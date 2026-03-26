@@ -51,10 +51,18 @@ export async function initNailEngine(): Promise<HandLandmarker> {
  *
  * For the front-facing (selfie) camera, the image is mirrored,
  * so we account for that in the logic.
+ *
+ * Fix 5: Hysteresis via dead zone to prevent flickering at boundary.
  */
+
+// Fix 5: Module-level map to track previous back-of-hand state per hand
+const prevBackOfHand: Map<string, boolean> = new Map();
+const BACK_OF_HAND_DEAD_ZONE = 0.01;
+
 function isBackOfHand(
   landmarks: { x: number; y: number; z: number }[],
-  handedness: string // "Left" or "Right" from MediaPipe
+  handedness: string, // "Left" or "Right" from MediaPipe
+  handKey: string // stable key for hysteresis tracking
 ): boolean {
   const wrist = landmarks[0];
   const indexMcp = landmarks[5];
@@ -69,25 +77,47 @@ function isBackOfHand(
   // 2D cross product (z-component of 3D cross product)
   const cross = v1x * v2y - v1y * v2x;
 
+  // Fix 5: Dead zone hysteresis — if cross product magnitude is below
+  // threshold, keep the previous state to prevent flickering.
+  const absCross = Math.abs(cross);
+  if (absCross < BACK_OF_HAND_DEAD_ZONE) {
+    const prev = prevBackOfHand.get(handKey);
+    if (prev !== undefined) return prev;
+    // If no previous state, fall through to normal logic
+  }
+
   // MediaPipe labels hands as seen from the camera's perspective.
   // In a mirrored selfie view:
   // - "Right" hand with cross > 0 → back of hand (nails visible)
   // - "Right" hand with cross < 0 → palm (no nails)
   // - "Left" hand: opposite
+  let result: boolean;
   if (handedness === "Right") {
-    return cross > 0;
+    result = cross > 0;
   } else {
-    return cross < 0;
+    result = cross < 0;
   }
+
+  prevBackOfHand.set(handKey, result);
+  return result;
 }
 
-// Finger definitions with neighbor indices for width estimation
+// Fix 4: Per-finger nail width ratio relative to phalanx length
+const FINGER_NAIL_WIDTH_RATIO: Record<string, number> = {
+  thumb: 0.75,
+  index: 0.52,
+  middle: 0.50,
+  ring: 0.48,
+  pinky: 0.45,
+};
+
+// Finger definitions (neighborDip removed — no longer used)
 const FINGERS = [
-  { tip: 4, dip: 3, pip: 2, mcp: 1, neighborDip: 7, name: "thumb" },   // neighbor: index DIP
-  { tip: 8, dip: 7, pip: 6, mcp: 5, neighborDip: 11, name: "index" },   // neighbor: middle DIP
-  { tip: 12, dip: 11, pip: 10, mcp: 9, neighborDip: 7, name: "middle" }, // neighbor: index DIP
-  { tip: 16, dip: 15, pip: 14, mcp: 13, neighborDip: 11, name: "ring" }, // neighbor: middle DIP
-  { tip: 20, dip: 19, pip: 18, mcp: 17, neighborDip: 15, name: "pinky" },// neighbor: ring DIP
+  { tip: 4, dip: 3, pip: 2, mcp: 1, name: "thumb" },
+  { tip: 8, dip: 7, pip: 6, mcp: 5, name: "index" },
+  { tip: 12, dip: 11, pip: 10, mcp: 9, name: "middle" },
+  { tip: 16, dip: 15, pip: 14, mcp: 13, name: "ring" },
+  { tip: 20, dip: 19, pip: 18, mcp: 17, name: "pinky" },
 ];
 
 interface NailRegion {
@@ -103,7 +133,8 @@ interface NailRegion {
 
 // Temporal smoothing state
 const prevRegions: Map<string, NailRegion[]> = new Map();
-const SMOOTH_FACTOR = 0.45;
+// Fix 2: Reduced from 0.45 to 0.15 for more responsive tracking
+const SMOOTH_FACTOR = 0.15;
 
 function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
@@ -144,7 +175,7 @@ function lerpAngle(a: number, b: number, t: number): number {
   return a + diff * t;
 }
 
-function dist2d(
+function phalanxLength(
   a: { x: number; y: number },
   b: { x: number; y: number },
   w: number,
@@ -164,13 +195,11 @@ function getNailRegions(
     const tip = landmarks[finger.tip];
     const dip = landmarks[finger.dip];
     const pip = landmarks[finger.pip];
-    const neighbor = landmarks[finger.neighborDip];
 
     // === Nail center ===
-    // Nail sits on the dorsal side of the distal phalanx.
-    // Center is ~55% from DIP toward TIP.
-    const cx = lerp(dip.x, tip.x, 0.55) * canvasWidth;
-    const cy = lerp(dip.y, tip.y, 0.55) * canvasHeight;
+    // Fix 3: Nail plate center is ~42% from DIP toward TIP (was 0.55)
+    const cx = lerp(dip.x, tip.x, 0.42) * canvasWidth;
+    const cy = lerp(dip.y, tip.y, 0.42) * canvasHeight;
 
     // === Angle ===
     // Use PIP→TIP vector for stable direction (spans 2 joints = less jitter)
@@ -180,31 +209,21 @@ function getNailRegions(
 
     // === Nail height ===
     // Based on DIP-to-TIP distance (the distal phalanx length)
-    const phalanxLen = dist2d(dip, tip, canvasWidth, canvasHeight);
+    const phalanxLen = phalanxLength(dip, tip, canvasWidth, canvasHeight);
     const nailHeight = phalanxLen * 0.88;
 
-    // === Nail width (from neighbor finger spacing) ===
-    // The distance between this finger's DIP and the neighbor's DIP
-    // gives us an estimate of finger width at the DIP level.
-    const interFingerDist = dist2d(dip, neighbor, canvasWidth, canvasHeight);
-    // Nail is roughly 60-70% of finger width
-    const fingerWidth = interFingerDist * 0.55;
-    // Clamp to reasonable range relative to phalanx length
-    const clampedWidth = Math.max(
-      phalanxLen * 0.35,
-      Math.min(fingerWidth, phalanxLen * 0.75)
-    );
+    // === Nail width (Fix 4: phalanx-length-based with per-finger ratio) ===
+    const ratio = FINGER_NAIL_WIDTH_RATIO[finger.name] ?? 0.50;
+    const nailWidth = phalanxLen * ratio;
 
     // Base (cuticle) is slightly wider than tip (free edge)
-    const widthBase = clampedWidth;
-    const widthTip = clampedWidth * 0.88;
+    const widthBase = nailWidth;
+    const widthTip = nailWidth * 0.88;
 
     // === Perspective ===
-    // When the finger points away from camera, the z difference between
-    // DIP and TIP is large → nail appears foreshortened.
-    // When finger is parallel to camera plane → nail fully visible.
+    // Fix 6: Less aggressive perspective falloff (was zDiff * 6, now * 2.5)
     const zDiff = Math.abs(tip.z - dip.z);
-    const perspective = Math.max(0, Math.min(1, 1 - zDiff * 6));
+    const perspective = Math.max(0, Math.min(1, 1 - zDiff * 2.5));
 
     // Confidence: combine perspective + minimum size threshold
     const confidence = perspective > 0.15 ? perspective : 0;
@@ -240,8 +259,10 @@ function drawNailShape(
   // Start at bottom-left (cuticle left corner)
   ctx.moveTo(-wBase / 2, effH / 2);
 
-  // Cuticle edge: slight inward curve (lunula shape)
-  ctx.quadraticCurveTo(0, effH / 2 + effH * 0.04, wBase / 2, effH / 2);
+  // Fix 9: Cuticle edge curves inward (recedes under skin)
+  // Was: effH / 2 + effH * 0.04 (outward)
+  // Now: effH / 2 - effH * 0.06 (inward)
+  ctx.quadraticCurveTo(0, effH / 2 - effH * 0.06, wBase / 2, effH / 2);
 
   // Right side: taper inward from base to tip
   ctx.lineTo(wTip / 2, -effH / 2 + rTop);
@@ -277,7 +298,7 @@ function drawNailOverlay(
   ctx.translate(cx, cy);
   ctx.rotate(angle - Math.PI / 2);
 
-  // === Pass 1: Base color ===
+  // === Fix 7: Pass 1 — Multiply blend for natural skin tint ===
   drawNailShape(ctx, wB, wT, h, perspective);
 
   if (pattern === "gradient" && colors.length > 1) {
@@ -289,14 +310,41 @@ function drawNailOverlay(
     ctx.fillStyle = colors[0];
   }
 
-  ctx.globalAlpha = 0.78 * confidence;
+  ctx.globalCompositeOperation = "multiply";
+  ctx.globalAlpha = 0.3 * confidence;
   ctx.fill();
 
-  // === Pass 2: Clip to nail shape for all subsequent passes ===
+  // === Fix 7: Pass 2 — Main opaque color layer with source-over ===
+  drawNailShape(ctx, wB, wT, h, perspective);
+
+  if (pattern === "gradient" && colors.length > 1) {
+    const grad = ctx.createLinearGradient(0, effH / 2, 0, -effH / 2);
+    grad.addColorStop(0, colors[0]);
+    grad.addColorStop(1, colors[1]);
+    ctx.fillStyle = grad;
+  } else {
+    ctx.fillStyle = colors[0];
+  }
+
+  ctx.globalCompositeOperation = "source-over";
+  ctx.globalAlpha = 0.85 * confidence;
+  // Fix 8: Edge feathering — soft shadow behind nail edges
+  ctx.shadowColor = "rgba(0,0,0,0.12)";
+  ctx.shadowBlur = 2;
+  ctx.fill();
+  // Reset shadow
+  ctx.shadowColor = "transparent";
+  ctx.shadowBlur = 0;
+
+  // === Clip to nail shape for all subsequent passes ===
   drawNailShape(ctx, wB, wT, h, perspective);
   ctx.clip();
 
-  // === Pass 3: Lunula (half-moon at cuticle) ===
+  // Reset shadow after clip
+  ctx.shadowColor = "transparent";
+  ctx.shadowBlur = 0;
+
+  // === Lunula (half-moon at cuticle) ===
   const avgW = (wB + wT) / 2;
   ctx.globalAlpha = 0.18 * confidence;
   ctx.fillStyle = "rgba(255,255,255,0.9)";
@@ -304,7 +352,7 @@ function drawNailOverlay(
   ctx.ellipse(0, effH / 2 - effH * 0.05, avgW * 0.35, effH * 0.12, 0, 0, Math.PI * 2);
   ctx.fill();
 
-  // === Pass 4: Glossy highlight (curved specular band) ===
+  // === Glossy highlight (curved specular band) ===
   const glossGrad = ctx.createRadialGradient(
     -avgW * 0.12, -effH * 0.15, 0,
     0, 0, Math.max(effH, avgW) * 0.7
@@ -317,7 +365,7 @@ function drawNailOverlay(
   ctx.fillStyle = glossGrad;
   ctx.fillRect(-wB, -effH, wB * 2, effH * 2);
 
-  // === Pass 5: Side shadow for depth ===
+  // === Side shadow for depth ===
   const shadowL = ctx.createLinearGradient(-wB / 2, 0, -wB / 2 + avgW * 0.3, 0);
   shadowL.addColorStop(0, "rgba(0,0,0,0.15)");
   shadowL.addColorStop(1, "rgba(0,0,0,0)");
@@ -331,7 +379,7 @@ function drawNailOverlay(
   ctx.fillStyle = shadowR;
   ctx.fillRect(-wB, -effH, wB * 2, effH * 2);
 
-  // === Pass 6: Glitter particles ===
+  // === Glitter particles ===
   if (pattern === "glitter") {
     ctx.globalAlpha = 0.7 * confidence;
     const time = performance.now() * 0.001;
@@ -348,7 +396,7 @@ function drawNailOverlay(
     }
   }
 
-  // === Pass 7: French tip ===
+  // === French tip ===
   if (pattern === "art" && colors.length > 1) {
     ctx.globalAlpha = 0.9 * confidence;
     const frenchY = -effH / 2 + effH * 0.3;
@@ -403,14 +451,15 @@ export function renderNailArt(
 
   for (let hi = 0; hi < result.landmarks.length; hi++) {
     const handLandmarks = result.landmarks[hi];
-    const handKey = `hand_${hi}`;
 
-    // Determine handedness ("Left" or "Right")
+    // Fix 10: Stable hand key from handedness instead of detection order index
     const handedness =
-      result.handednesses?.[hi]?.[0]?.categoryName ?? "Right";
+      result.handednesses?.[hi]?.[0]?.categoryName ?? "Unknown";
+    const handKey = `hand_${handedness}`;
 
     // Only render nails when the back of the hand (dorsal side) faces the camera
-    if (!isBackOfHand(handLandmarks, handedness)) {
+    // Fix 5: Pass handKey for hysteresis tracking
+    if (!isBackOfHand(handLandmarks, handedness, handKey)) {
       // Palm is facing camera — nails are not visible, skip rendering
       prevRegions.delete(handKey); // reset smoothing so there's no ghost
       continue;
@@ -419,10 +468,11 @@ export function renderNailArt(
     let nailRegions = getNailRegions(handLandmarks, width, height);
 
     // Mirror x coordinates (video is horizontally flipped)
+    // Fix 1: Correct horizontal mirror formula: Math.PI - angle
     nailRegions = nailRegions.map((r) => ({
       ...r,
       cx: width - r.cx,
-      angle: -(r.angle - Math.PI) - Math.PI,
+      angle: Math.PI - r.angle,
     }));
 
     // Apply temporal smoothing
@@ -438,4 +488,5 @@ export function destroyNailEngine() {
   handLandmarker?.close();
   handLandmarker = null;
   prevRegions.clear();
+  prevBackOfHand.clear();
 }
