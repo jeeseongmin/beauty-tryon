@@ -396,11 +396,21 @@ async function runInference(tensor: import("onnxruntime-web").Tensor) {
     const kept = nms(detections);
 
     // Combine all nail detection masks into one (max-merge)
+    // CRITICAL: crop each instance mask to its bounding box to prevent
+    // color bleeding outside the nail region.
     const combinedMask = new Float32Array(MASK_W * MASK_H);
+    const maskScale = MASK_W / INPUT_SIZE; // 80/320 = 0.25
 
     for (const det of kept) {
-      for (let py = 0; py < MASK_H; py++) {
-        for (let px = 0; px < MASK_W; px++) {
+      // Convert bbox from 320x320 coords to 80x80 mask coords
+      const bx1 = Math.max(0, Math.floor((det.x - det.w / 2) * maskScale));
+      const by1 = Math.max(0, Math.floor((det.y - det.h / 2) * maskScale));
+      const bx2 = Math.min(MASK_W, Math.ceil((det.x + det.w / 2) * maskScale));
+      const by2 = Math.min(MASK_H, Math.ceil((det.y + det.h / 2) * maskScale));
+
+      // Only compute mask within the bounding box (not the entire 80x80)
+      for (let py = by1; py < by2; py++) {
+        for (let px = bx1; px < bx2; px++) {
           let val = 0;
           for (let k = 0; k < NUM_MASK_COEFFS; k++) {
             val +=
