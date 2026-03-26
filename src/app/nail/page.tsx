@@ -2,75 +2,143 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import Link from "next/link";
-import { useCamera } from "@/lib/useCamera";
-import { initNailEngine, renderNailArt, destroyNailEngine } from "@/lib/nailArtEngine";
+import { initNailEngine, processNailPhoto, destroyNailEngine } from "@/lib/nailArtEngine";
 import NailPalette from "@/components/NailPalette";
 import { nailDesigns, NailDesign } from "@/data/products";
 
 export default function NailPage() {
-  const { videoRef, isReady, error, start, stop } = useCamera();
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const animFrameRef = useRef<number>(0);
+  const [capturedImage, setCapturedImage] = useState<HTMLCanvasElement | null>(null);
   const [selectedDesign, setSelectedDesign] = useState<NailDesign | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [engineReady, setEngineReady] = useState(false);
+  const [processing, setProcessing] = useState(false);
+  const [engineLoaded, setEngineLoaded] = useState(false);
+  const [hasResult, setHasResult] = useState(false);
 
-  const startAR = useCallback(async () => {
-    setLoading(true);
+  // Photo capture via camera
+  const captureFromCamera = async () => {
     try {
-      await start();
-      await initNailEngine();
-      setEngineReady(true);
-    } catch (err) {
-      console.error("Failed to init nail AR:", err);
-    } finally {
-      setLoading(false);
-    }
-  }, [start]);
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 960 } },
+      });
+      const video = document.createElement("video");
+      video.srcObject = stream;
+      video.playsInline = true;
+      await video.play();
 
-  // Render loop
-  useEffect(() => {
-    if (!isReady || !engineReady || !canvasRef.current || !videoRef.current)
-      return;
+      // Wait for video to be ready
+      await new Promise((resolve) => setTimeout(resolve, 500));
 
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext("2d")!;
-    const video = videoRef.current;
+      // Capture frame
+      const canvas = document.createElement("canvas");
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext("2d")!;
+      ctx.drawImage(video, 0, 0);
 
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+      // Stop camera
+      stream.getTracks().forEach((t) => t.stop());
 
-    let running = true;
-    const render = () => {
-      if (!running) return;
+      setCapturedImage(canvas);
+      setHasResult(false);
+      setSelectedDesign(null);
 
-      if (selectedDesign) {
-        renderNailArt(ctx, video, selectedDesign.colors, selectedDesign.pattern);
-      } else {
-        // Just mirror the video
-        ctx.save();
-        ctx.scale(-1, 1);
-        ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
-        ctx.restore();
+      // Display captured photo on visible canvas
+      if (canvasRef.current) {
+        canvasRef.current.width = canvas.width;
+        canvasRef.current.height = canvas.height;
+        canvasRef.current.getContext("2d")!.drawImage(canvas, 0, 0);
       }
 
-      animFrameRef.current = requestAnimationFrame(render);
-    };
-    render();
+      // Init engine in background
+      if (!engineLoaded) {
+        initNailEngine().then(() => setEngineLoaded(true));
+      }
+    } catch (err) {
+      console.error("Camera error:", err);
+    }
+  };
 
-    return () => {
-      running = false;
-      cancelAnimationFrame(animFrameRef.current);
-    };
-  }, [isReady, engineReady, selectedDesign, videoRef]);
+  // Photo upload from gallery
+  const uploadFromGallery = () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/*";
+    input.onchange = (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
 
-  // Cleanup
-  useEffect(() => {
-    return () => {
-      stop();
-      destroyNailEngine();
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        const ctx = canvas.getContext("2d")!;
+        ctx.drawImage(img, 0, 0);
+
+        setCapturedImage(canvas);
+        setHasResult(false);
+        setSelectedDesign(null);
+
+        // Display on visible canvas
+        if (canvasRef.current) {
+          canvasRef.current.width = canvas.width;
+          canvasRef.current.height = canvas.height;
+          canvasRef.current.getContext("2d")!.drawImage(canvas, 0, 0);
+        }
+
+        // Init engine
+        if (!engineLoaded) {
+          initNailEngine().then(() => setEngineLoaded(true));
+        }
+
+        URL.revokeObjectURL(img.src);
+      };
+      img.src = URL.createObjectURL(file);
     };
-  }, [stop]);
+    input.click();
+  };
+
+  // Process when design is selected
+  const handleDesignSelect = useCallback(
+    async (design: NailDesign) => {
+      if (!capturedImage || processing) return;
+      setSelectedDesign(design);
+      setProcessing(true);
+
+      try {
+        if (!engineLoaded) {
+          await initNailEngine();
+          setEngineLoaded(true);
+        }
+
+        const resultCanvas = await processNailPhoto(
+          capturedImage,
+          design.colors,
+          design.pattern,
+        );
+
+        // Display result on visible canvas
+        if (canvasRef.current) {
+          canvasRef.current.width = resultCanvas.width;
+          canvasRef.current.height = resultCanvas.height;
+          canvasRef.current.getContext("2d")!.drawImage(resultCanvas, 0, 0);
+        }
+        setHasResult(true);
+      } catch (err) {
+        console.error("Processing error:", err);
+      } finally {
+        setProcessing(false);
+      }
+    },
+    [capturedImage, processing, engineLoaded],
+  );
+
+  // Retake photo
+  const retake = () => {
+    setCapturedImage(null);
+    setSelectedDesign(null);
+    setHasResult(false);
+  };
 
   // Screenshot
   const takeScreenshot = () => {
@@ -81,6 +149,13 @@ export default function NailPage() {
     link.click();
   };
 
+  // Cleanup
+  useEffect(() => {
+    return () => {
+      destroyNailEngine();
+    };
+  }, []);
+
   return (
     <div className="flex-1 flex flex-col bg-gray-950 text-white">
       {/* Header */}
@@ -88,55 +163,57 @@ export default function NailPage() {
         <Link href="/" className="text-sm text-gray-400 hover:text-white">
           ← 돌아가기
         </Link>
-        <h1 className="text-sm font-semibold">💅 네일 아트 체험</h1>
+        <h1 className="text-sm font-semibold">네일 아트 체험</h1>
         <div className="w-16" />
       </header>
 
-      {/* Camera / Canvas */}
+      {/* Main content area */}
       <div className="flex-1 relative flex items-center justify-center bg-black">
-        {!isReady && !loading && (
+        {/* Landing: no photo captured yet */}
+        {!capturedImage && (
           <div className="text-center p-8">
             <div className="text-6xl mb-6">💅</div>
-            <h2 className="text-xl font-bold mb-2">네일 아트 시뮬레이션</h2>
-            <p className="text-gray-400 text-sm mb-6">
-              카메라에 손을 비추면 네일 아트 필름이
+            <h2 className="text-xl font-bold mb-2">네일 아트 체험</h2>
+            <p className="text-gray-400 text-sm mb-8">
+              손등 사진을 찍거나 갤러리에서 선택하세요.
               <br />
-              실시간으로 적용됩니다
+              AI가 손톱을 찾아 디자인을 입혀드립니다.
             </p>
-            <button
-              onClick={startAR}
-              className="px-8 py-3 bg-purple-500 hover:bg-purple-600 text-white rounded-full font-medium transition-colors"
-            >
-              카메라 시작하기
-            </button>
-            {error && (
-              <p className="mt-4 text-red-400 text-sm">{error}</p>
-            )}
+            <div className="flex flex-col sm:flex-row gap-3 justify-center">
+              <button
+                onClick={captureFromCamera}
+                className="px-8 py-3 bg-purple-500 hover:bg-purple-600 text-white rounded-full font-medium transition-colors"
+              >
+                📷 사진 촬영
+              </button>
+              <button
+                onClick={uploadFromGallery}
+                className="px-8 py-3 bg-gray-700 hover:bg-gray-600 text-white rounded-full font-medium transition-colors"
+              >
+                🖼️ 갤러리에서 선택
+              </button>
+            </div>
           </div>
         )}
 
-        {loading && (
-          <div className="text-center p-8">
-            <div className="animate-spin w-10 h-10 border-4 border-purple-500 border-t-transparent rounded-full mx-auto mb-4" />
-            <p className="text-gray-400 text-sm">AI 엔진을 불러오는 중...</p>
-          </div>
-        )}
-
-        <video
-          ref={videoRef}
-          className="hidden"
-          playsInline
-          muted
-        />
+        {/* Canvas: shows captured photo or processed result */}
         <canvas
           ref={canvasRef}
-          className={`max-w-full max-h-full object-contain ${
-            isReady ? "block" : "hidden"
-          }`}
+          className={`max-w-full max-h-full object-contain ${capturedImage ? "block" : "hidden"}`}
         />
 
-        {/* Selected design indicator */}
-        {isReady && selectedDesign && (
+        {/* Processing overlay */}
+        {processing && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+            <div className="text-center">
+              <div className="animate-spin w-10 h-10 border-4 border-purple-500 border-t-transparent rounded-full mx-auto mb-4" />
+              <p className="text-gray-300 text-sm">네일 디자인 적용 중...</p>
+            </div>
+          </div>
+        )}
+
+        {/* Design indicator */}
+        {capturedImage && selectedDesign && hasResult && (
           <div className="absolute top-4 left-4 flex items-center gap-2 bg-black/50 rounded-full px-3 py-1.5 backdrop-blur">
             <span
               className="w-4 h-4 rounded-full border border-white/50"
@@ -146,34 +223,44 @@ export default function NailPage() {
           </div>
         )}
 
-        {/* Guide text */}
-        {isReady && !selectedDesign && (
-          <div className="absolute bottom-20 left-0 right-0 text-center">
+        {/* Retake + save buttons */}
+        {capturedImage && (
+          <div className="absolute top-4 right-4 flex gap-2">
+            <button
+              onClick={retake}
+              className="px-4 py-2 bg-white/20 backdrop-blur rounded-full text-xs hover:bg-white/30 transition-colors"
+            >
+              다시 찍기
+            </button>
+            {hasResult && (
+              <button
+                onClick={takeScreenshot}
+                className="w-10 h-10 bg-white/20 backdrop-blur rounded-full flex items-center justify-center hover:bg-white/30 transition-colors"
+                title="저장"
+              >
+                📸
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Guide: photo captured but no design selected */}
+        {capturedImage && !selectedDesign && !processing && (
+          <div className="absolute bottom-4 left-0 right-0 text-center">
             <p className="text-gray-400 text-sm bg-black/40 inline-block px-4 py-2 rounded-full backdrop-blur">
               아래에서 네일 디자인을 선택하세요
             </p>
           </div>
         )}
-
-        {/* Screenshot button */}
-        {isReady && selectedDesign && (
-          <button
-            onClick={takeScreenshot}
-            className="absolute bottom-4 right-4 w-12 h-12 bg-white/20 backdrop-blur rounded-full flex items-center justify-center hover:bg-white/30 transition-colors"
-            title="스크린샷 저장"
-          >
-            📸
-          </button>
-        )}
       </div>
 
-      {/* Nail design palette */}
-      {isReady && (
+      {/* Nail palette: shown when photo is captured */}
+      {capturedImage && (
         <div className="bg-gray-900 px-4 py-4 border-t border-gray-800">
           <NailPalette
             designs={nailDesigns}
             selectedId={selectedDesign?.id ?? null}
-            onSelect={setSelectedDesign}
+            onSelect={handleDesignSelect}
           />
         </div>
       )}

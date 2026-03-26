@@ -3,18 +3,19 @@
 /**
  * Nail art engine using YOLOv8 segmentation ONNX model.
  *
- * Pipeline:
+ * Pipeline (photo-based):
  * 1. Load ONNX model via onnxruntime-web
- * 2. Per frame:
- *    a. Draw mirrored video to main canvas
- *    b. Preprocess video frame → 320×320 RGB float32 tensor (BCHW, 0-1 normalized)
- *    c. Run ONNX inference
- *    d. Post-process: NMS on detections → compute instance masks → combine into single nail mask (80×80)
- *    e. Temporal smoothing on the combined mask
+ * 2. Per photo:
+ *    a. Draw original image to output canvas at full resolution
+ *    b. Auto-correct photo (brightness, contrast, white balance)
+ *    c. Preprocess image → 320×320 RGB float32 tensor (BCHW, 0-1 normalized)
+ *    d. Run ONNX inference (await)
+ *    e. Post-process: NMS on detections → compute instance masks → combine into single nail mask (80×80)
  *    f. Alpha curve shaping (smoothstep)
  *    g. Edge feathering (box blur)
- *    h. HSL luminance-preserving color transfer (replace H/S, keep L)
- *    i. Single composite pass (source-over, mirrored)
+ *    h. Upscale mask to full resolution
+ *    i. HSL luminance-preserving color transfer at full resolution
+ *    j. Specular highlight per detection bbox
  */
 
 // Dynamic import for SSR compatibility
@@ -30,21 +31,6 @@ async function loadOrt() {
 
 let session: import("onnxruntime-web").InferenceSession | null = null;
 
-// Offscreen canvases (reused each frame)
-let preprocessCanvas: HTMLCanvasElement | null = null;
-let preprocessCtx: CanvasRenderingContext2D | null = null;
-let rawMaskCanvas: HTMLCanvasElement | null = null;
-let rawMaskCtx: CanvasRenderingContext2D | null = null;
-let smoothMaskCanvas: HTMLCanvasElement | null = null;
-let smoothMaskCtx: CanvasRenderingContext2D | null = null;
-let videoSampleCanvas: HTMLCanvasElement | null = null;
-let videoSampleCtx: CanvasRenderingContext2D | null = null;
-let recolorCanvas: HTMLCanvasElement | null = null;
-let recolorCtx: CanvasRenderingContext2D | null = null;
-
-// Temporal smoothing: stores the smoothed mask from the previous frame
-let prevAlpha: Float32Array | null = null;
-
 // Model constants
 const INPUT_SIZE = 320;
 const MASK_W = 80;
@@ -55,11 +41,9 @@ const CONF_THRESHOLD = 0.5;
 const NMS_IOU_THRESHOLD = 0.5;
 
 // Rendering constants
-const TEMPORAL_BLEND = 0.55;
 const BLUR_PASSES = 3;
 const BLUR_RADIUS = 2;
 const ALPHA_THRESHOLD = 0.02;
-const OPACITY = 0.65;
 
 // ---------- RGB <-> HSL conversion ----------
 
@@ -240,48 +224,76 @@ function boxBlurVertical(
   }
 }
 
-// ---------- Canvas management ----------
+// ---------- Auto photo correction ----------
 
-function ensurePreprocessCanvas() {
-  if (!preprocessCanvas) {
-    preprocessCanvas = document.createElement("canvas");
-    preprocessCanvas.width = INPUT_SIZE;
-    preprocessCanvas.height = INPUT_SIZE;
-    preprocessCtx = preprocessCanvas.getContext("2d", {
-      willReadFrequently: true,
-    })!;
-  }
-}
+function autoCorrectPhoto(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number
+) {
+  const imageData = ctx.getImageData(0, 0, w, h);
+  const data = imageData.data;
+  const numPixels = w * h;
 
-function ensureCanvases(w: number, h: number) {
-  if (!rawMaskCanvas || rawMaskCanvas.width !== w) {
-    rawMaskCanvas = document.createElement("canvas");
-    rawMaskCanvas.width = w;
-    rawMaskCanvas.height = h;
-    rawMaskCtx = rawMaskCanvas.getContext("2d", { willReadFrequently: true })!;
+  // 1. Analyze brightness histogram
+  let totalBrightness = 0;
+  let rSum = 0,
+    gSum = 0,
+    bSum = 0;
+  for (let i = 0; i < numPixels; i++) {
+    const idx = i * 4;
+    const brightness = (data[idx] + data[idx + 1] + data[idx + 2]) / 3;
+    totalBrightness += brightness;
+    rSum += data[idx];
+    gSum += data[idx + 1];
+    bSum += data[idx + 2];
   }
-  if (!smoothMaskCanvas || smoothMaskCanvas.width !== w) {
-    smoothMaskCanvas = document.createElement("canvas");
-    smoothMaskCanvas.width = w;
-    smoothMaskCanvas.height = h;
-    smoothMaskCtx = smoothMaskCanvas.getContext("2d", {
-      willReadFrequently: true,
-    })!;
+
+  const avgBrightness = totalBrightness / numPixels;
+  const avgR = rSum / numPixels;
+  const avgG = gSum / numPixels;
+  const avgB = bSum / numPixels;
+
+  // 2. Target brightness: 130 (out of 255) — well-lit indoor photo
+  const TARGET_BRIGHTNESS = 130;
+  const brightnessFactor =
+    avgBrightness < 80
+      ? TARGET_BRIGHTNESS / avgBrightness // dark photo: brighten
+      : avgBrightness > 200
+        ? TARGET_BRIGHTNESS / avgBrightness // overexposed: darken
+        : 1.0; // acceptable range: no change
+  // Clamp factor to reasonable range
+  const bf = Math.max(0.7, Math.min(1.8, brightnessFactor));
+
+  // 3. Gray world white balance
+  const avgAll = (avgR + avgG + avgB) / 3;
+  const wbR = avgAll / (avgR || 1);
+  const wbG = avgAll / (avgG || 1);
+  const wbB = avgAll / (avgB || 1);
+  // Clamp WB factors to prevent extreme shifts
+  const clampWB = (v: number) => Math.max(0.8, Math.min(1.2, v));
+
+  // 4. Contrast: slight S-curve (10% contrast boost)
+  const CONTRAST = 1.1;
+
+  // 5. Apply all corrections in single pass
+  for (let i = 0; i < numPixels; i++) {
+    const idx = i * 4;
+    let r = data[idx] * bf * clampWB(wbR);
+    let g = data[idx + 1] * bf * clampWB(wbG);
+    let b = data[idx + 2] * bf * clampWB(wbB);
+
+    // Contrast: remap around 128 midpoint
+    r = ((r / 255 - 0.5) * CONTRAST + 0.5) * 255;
+    g = ((g / 255 - 0.5) * CONTRAST + 0.5) * 255;
+    b = ((b / 255 - 0.5) * CONTRAST + 0.5) * 255;
+
+    data[idx] = Math.max(0, Math.min(255, r)) | 0;
+    data[idx + 1] = Math.max(0, Math.min(255, g)) | 0;
+    data[idx + 2] = Math.max(0, Math.min(255, b)) | 0;
   }
-  if (!videoSampleCanvas || videoSampleCanvas.width !== w) {
-    videoSampleCanvas = document.createElement("canvas");
-    videoSampleCanvas.width = w;
-    videoSampleCanvas.height = h;
-    videoSampleCtx = videoSampleCanvas.getContext("2d", {
-      willReadFrequently: true,
-    })!;
-  }
-  if (!recolorCanvas || recolorCanvas.width !== w) {
-    recolorCanvas = document.createElement("canvas");
-    recolorCanvas.width = w;
-    recolorCanvas.height = h;
-    recolorCtx = recolorCanvas.getContext("2d", { willReadFrequently: true })!;
-  }
+
+  ctx.putImageData(imageData, 0, 0);
 }
 
 // ---------- Public API ----------
@@ -295,27 +307,41 @@ export async function initNailEngine(): Promise<void> {
   });
 }
 
-export function renderNailArt(
-  ctx: CanvasRenderingContext2D,
-  video: HTMLVideoElement,
+export async function processNailPhoto(
+  image: HTMLImageElement | HTMLCanvasElement,
   colors: string[],
   pattern: string
-): void {
-  const vidW = ctx.canvas.width;
-  const vidH = ctx.canvas.height;
+): Promise<HTMLCanvasElement> {
+  if (!session || !ort) {
+    throw new Error("Nail engine not initialized. Call initNailEngine() first.");
+  }
 
-  // 1. Draw mirrored video to main canvas
-  ctx.save();
-  ctx.scale(-1, 1);
-  ctx.drawImage(video, -vidW, 0, vidW, vidH);
-  ctx.restore();
+  // 1. Create output canvas at original image resolution
+  const srcW =
+    image instanceof HTMLImageElement ? image.naturalWidth : image.width;
+  const srcH =
+    image instanceof HTMLImageElement ? image.naturalHeight : image.height;
 
-  if (!session || !ort) return;
+  const outputCanvas = document.createElement("canvas");
+  outputCanvas.width = srcW;
+  outputCanvas.height = srcH;
+  const outCtx = outputCanvas.getContext("2d")!;
 
-  // 2. Preprocess: draw video to 320×320, extract BCHW float32 tensor
-  ensurePreprocessCanvas();
-  preprocessCtx!.drawImage(video, 0, 0, INPUT_SIZE, INPUT_SIZE);
-  const imageData = preprocessCtx!.getImageData(0, 0, INPUT_SIZE, INPUT_SIZE);
+  // 2. Draw original image to output canvas
+  outCtx.drawImage(image, 0, 0, srcW, srcH);
+
+  // 3. Auto-correct the photo (brightness, contrast, white balance)
+  autoCorrectPhoto(outCtx, srcW, srcH);
+
+  // 4. Preprocess for ONNX: draw to 320x320
+  const preprocessCanvas = document.createElement("canvas");
+  preprocessCanvas.width = INPUT_SIZE;
+  preprocessCanvas.height = INPUT_SIZE;
+  const preprocessCtx = preprocessCanvas.getContext("2d", {
+    willReadFrequently: true,
+  })!;
+  preprocessCtx.drawImage(image, 0, 0, INPUT_SIZE, INPUT_SIZE);
+  const imageData = preprocessCtx.getImageData(0, 0, INPUT_SIZE, INPUT_SIZE);
   const { data } = imageData;
 
   const inputLen = 3 * INPUT_SIZE * INPUT_SIZE;
@@ -327,45 +353,37 @@ export function renderNailArt(
     input[2 * pixelCount + i] = data[i * 4 + 2] / 255; // B
   }
 
-  const tensor = new ort.Tensor("float32", input, [1, 3, INPUT_SIZE, INPUT_SIZE]);
+  const tensor = new ort.Tensor("float32", input, [
+    1,
+    3,
+    INPUT_SIZE,
+    INPUT_SIZE,
+  ]);
 
-  // 3. Render cached mask from last completed inference (sync)
-  if (cachedCombinedMask) {
-    renderMask(cachedCombinedMask, ctx, video, vidW, vidH, colors, pattern);
-  }
-
-  // 4. Kick off next inference in background (result stored in cachedCombinedMask)
-  runInference(tensor);
-}
-
-// Inference result cache for async-to-sync bridge
-let pendingInference = false;
-let cachedCombinedMask: Float32Array | null = null;
-
-async function runInference(tensor: import("onnxruntime-web").Tensor) {
-  if (pendingInference) {
-    tensor.dispose?.();
-    return;
-  }
-
-  pendingInference = true;
+  // 5. Run ONNX inference
+  let kept: Detection[];
+  let output1Data: Float32Array;
 
   try {
-    const results = await session!.run({ images: tensor });
+    const results = await session.run({ images: tensor });
 
     const o0dims = results["output0"].dims;
     const o1dims = results["output1"].dims;
     if (o0dims[1] !== 37 || o0dims[2] !== 2100 || o1dims[1] !== 32) {
-      console.warn("Unexpected ONNX output shape", o0dims, o1dims);
+      // Dispose tensors
       tensor.dispose?.();
       for (const t of Object.values(results)) {
         (t as any).dispose?.();
       }
-      return;
+      throw new Error(
+        `Unexpected ONNX output shape: output0=${o0dims}, output1=${o1dims}`
+      );
     }
 
     const output0Data = results["output0"].data as Float32Array; // [1, 37, 2100]
-    const output1Data = results["output1"].data as Float32Array; // [1, 32, 80, 80]
+    output1Data = new Float32Array(
+      results["output1"].data as Float32Array
+    ); // [1, 32, 80, 80] — copy before disposing
 
     // Dispose tensors immediately after extracting data
     tensor.dispose?.();
@@ -373,7 +391,7 @@ async function runInference(tensor: import("onnxruntime-web").Tensor) {
       (t as any).dispose?.();
     }
 
-    // Post-process: collect detections above confidence threshold
+    // 6. Parse detections above confidence threshold
     const detections: Detection[] = [];
     for (let i = 0; i < NUM_DETECTIONS; i++) {
       const conf = output0Data[4 * NUM_DETECTIONS + i]; // class score at index 4
@@ -393,79 +411,59 @@ async function runInference(tensor: import("onnxruntime-web").Tensor) {
     }
 
     // Apply NMS
-    const kept = nms(detections);
+    kept = nms(detections);
+  } catch (e) {
+    tensor.dispose?.();
+    throw e;
+  }
 
-    // Combine all nail detection masks into one (max-merge)
-    // CRITICAL: crop each instance mask to its bounding box to prevent
-    // color bleeding outside the nail region.
-    const combinedMask = new Float32Array(MASK_W * MASK_H);
-    const maskScale = MASK_W / INPUT_SIZE; // 80/320 = 0.25
+  if (kept.length === 0) {
+    // No nails detected — return the auto-corrected photo as-is
+    return outputCanvas;
+  }
 
-    for (const det of kept) {
-      // Convert bbox from 320x320 coords to 80x80 mask coords
-      const bx1 = Math.max(0, Math.floor((det.x - det.w / 2) * maskScale));
-      const by1 = Math.max(0, Math.floor((det.y - det.h / 2) * maskScale));
-      const bx2 = Math.min(MASK_W, Math.ceil((det.x + det.w / 2) * maskScale));
-      const by2 = Math.min(MASK_H, Math.ceil((det.y + det.h / 2) * maskScale));
+  // 7. Combine all nail detection masks into one (max-merge)
+  //    Crop each instance mask to its bounding box to prevent color bleeding
+  const combinedMask = new Float32Array(MASK_W * MASK_H);
+  const maskScale = MASK_W / INPUT_SIZE; // 80/320 = 0.25
 
-      // Only compute mask within the bounding box (not the entire 80x80)
-      for (let py = by1; py < by2; py++) {
-        for (let px = bx1; px < bx2; px++) {
-          let val = 0;
-          for (let k = 0; k < NUM_MASK_COEFFS; k++) {
-            val +=
-              det.maskCoeffs[k] *
-              output1Data[k * MASK_W * MASK_H + py * MASK_W + px];
-          }
-          // Sigmoid
-          val = 1 / (1 + Math.exp(-val));
-          // Max-merge
-          const idx = py * MASK_W + px;
-          combinedMask[idx] = Math.max(combinedMask[idx], val);
+  for (const det of kept) {
+    const bx1 = Math.max(0, Math.floor((det.x - det.w / 2) * maskScale));
+    const by1 = Math.max(0, Math.floor((det.y - det.h / 2) * maskScale));
+    const bx2 = Math.min(MASK_W, Math.ceil((det.x + det.w / 2) * maskScale));
+    const by2 = Math.min(MASK_H, Math.ceil((det.y + det.h / 2) * maskScale));
+
+    for (let py = by1; py < by2; py++) {
+      for (let px = bx1; px < bx2; px++) {
+        let val = 0;
+        for (let k = 0; k < NUM_MASK_COEFFS; k++) {
+          val +=
+            det.maskCoeffs[k] *
+            output1Data[k * MASK_W * MASK_H + py * MASK_W + px];
         }
+        // Sigmoid
+        val = 1 / (1 + Math.exp(-val));
+        // Max-merge
+        const idx = py * MASK_W + px;
+        combinedMask[idx] = Math.max(combinedMask[idx], val);
       }
     }
-
-    // Store result — next renderNailArt call will pick it up
-    cachedCombinedMask = combinedMask;
-  } catch (e) {
-    console.error("Nail inference error:", e);
-  } finally {
-    pendingInference = false;
-  }
-}
-
-function renderMask(
-  combinedMask: Float32Array,
-  ctx: CanvasRenderingContext2D,
-  video: HTMLVideoElement,
-  vidW: number,
-  vidH: number,
-  colors: string[],
-  pattern: string
-) {
-  const totalPixels = MASK_W * MASK_H;
-
-  ensureCanvases(MASK_W, MASK_H);
-
-  // 6. Temporal smoothing + alpha curve shaping
-  if (!prevAlpha || prevAlpha.length !== totalPixels) {
-    prevAlpha = new Float32Array(totalPixels);
   }
 
-  const rawImageData = rawMaskCtx!.createImageData(MASK_W, MASK_H);
+  // 8. Alpha curve shaping (smoothstep, no temporal smoothing)
+  const totalMaskPixels = MASK_W * MASK_H;
+  const rawMaskCanvas = document.createElement("canvas");
+  rawMaskCanvas.width = MASK_W;
+  rawMaskCanvas.height = MASK_H;
+  const rawMaskCtx = rawMaskCanvas.getContext("2d", {
+    willReadFrequently: true,
+  })!;
+
+  const rawImageData = rawMaskCtx.createImageData(MASK_W, MASK_H);
   const rd = rawImageData.data;
 
-  for (let i = 0; i < totalPixels; i++) {
-    const currentAlpha = combinedMask[i];
-
-    // Temporal blend
-    const smoothedAlpha =
-      prevAlpha[i] * TEMPORAL_BLEND + currentAlpha * (1 - TEMPORAL_BLEND);
-    prevAlpha[i] = smoothedAlpha;
-
-    // Alpha curve shaping: smoothstep
-    const clamped = Math.max(0, Math.min(1, smoothedAlpha));
+  for (let i = 0; i < totalMaskPixels; i++) {
+    const clamped = Math.max(0, Math.min(1, combinedMask[i]));
     const shapedAlpha =
       clamped * clamped * (3 - 2 * clamped) * Math.pow(clamped, 0.15);
 
@@ -476,10 +474,14 @@ function renderMask(
     rd[idx + 3] = (shapedAlpha * 255 + 0.5) | 0;
   }
 
-  // 7. Edge feathering: multi-pass box blur
-  rawMaskCtx!.putImageData(rawImageData, 0, 0);
-  const blurredData = rawMaskCtx!.getImageData(0, 0, MASK_W, MASK_H);
-  const tempData = smoothMaskCtx!.createImageData(MASK_W, MASK_H);
+  // 9. Edge feathering: multi-pass box blur
+  rawMaskCtx.putImageData(rawImageData, 0, 0);
+  const blurredData = rawMaskCtx.getImageData(0, 0, MASK_W, MASK_H);
+  const tempCanvas = document.createElement("canvas");
+  tempCanvas.width = MASK_W;
+  tempCanvas.height = MASK_H;
+  const tempCtx = tempCanvas.getContext("2d", { willReadFrequently: true })!;
+  const tempData = tempCtx.createImageData(MASK_W, MASK_H);
 
   let srcBuf = blurredData.data;
   let dstBuf = tempData.data;
@@ -489,154 +491,144 @@ function renderMask(
     boxBlurVertical(dstBuf, srcBuf, MASK_W, MASK_H, BLUR_RADIUS);
   }
 
-  // 8. Sample video at mask resolution
-  videoSampleCtx!.drawImage(video, 0, 0, MASK_W, MASK_H);
-  const videoPixels = videoSampleCtx!.getImageData(0, 0, MASK_W, MASK_H);
-  const vd = videoPixels.data;
+  // srcBuf now contains the final blurred mask alpha at 80x80
 
-  // 9. HSL luminance-preserving color transfer
+  // 10. Upscale mask to original image resolution
+  //     Draw 80x80 mask to a canvas, then scale up with bilinear smoothing
+  rawMaskCtx.putImageData(blurredData, 0, 0);
+
+  const upscaledMaskCanvas = document.createElement("canvas");
+  upscaledMaskCanvas.width = srcW;
+  upscaledMaskCanvas.height = srcH;
+  const upscaledMaskCtx = upscaledMaskCanvas.getContext("2d", {
+    willReadFrequently: true,
+  })!;
+  upscaledMaskCtx.imageSmoothingEnabled = true;
+  upscaledMaskCtx.imageSmoothingQuality = "high";
+  upscaledMaskCtx.drawImage(rawMaskCanvas, 0, 0, srcW, srcH);
+
+  const upscaledMaskData = upscaledMaskCtx.getImageData(0, 0, srcW, srcH);
+  const maskPixels = upscaledMaskData.data;
+
+  // 11. Apply nail color at full resolution
+  const outputImageData = outCtx.getImageData(0, 0, srcW, srcH);
+  const outData = outputImageData.data;
+
   const color1 = parseHexColor(colors[0] || "#cc0000");
-  const [targetH1, targetS1] = rgbToHsl(color1[0], color1[1], color1[2]);
+  const [targetH1, targetS1, targetL1] = rgbToHsl(
+    color1[0],
+    color1[1],
+    color1[2]
+  );
 
   let color2: [number, number, number] | null = null;
   let targetH2 = 0,
-    targetS2 = 0;
+    targetS2 = 0,
+    targetL2 = 0;
   if (colors.length > 1) {
     color2 = parseHexColor(colors[1]);
-    [targetH2, targetS2] = rgbToHsl(color2[0], color2[1], color2[2]);
+    [targetH2, targetS2, targetL2] = rgbToHsl(color2[0], color2[1], color2[2]);
   }
 
-  const recolorData = recolorCtx!.createImageData(MASK_W, MASK_H);
-  const out = recolorData.data;
+  const totalOutputPixels = srcW * srcH;
 
-  const blurAlpha = srcBuf; // final blurred mask
-
-  for (let i = 0; i < totalPixels; i++) {
+  for (let i = 0; i < totalOutputPixels; i++) {
     const idx = i * 4;
-    const maskA = blurAlpha[idx + 3] / 255;
+    const maskA = maskPixels[idx + 3] / 255;
 
-    if (maskA < ALPHA_THRESHOLD) {
-      out[idx] = 0;
-      out[idx + 1] = 0;
-      out[idx + 2] = 0;
-      out[idx + 3] = 0;
-      continue;
-    }
+    if (maskA < ALPHA_THRESHOLD) continue;
 
-    const origR = vd[idx];
-    const origG = vd[idx + 1];
-    const origB = vd[idx + 2];
+    const origR = outData[idx];
+    const origG = outData[idx + 1];
+    const origB = outData[idx + 2];
     const [, origS, origL] = rgbToHsl(origR, origG, origB);
 
     let newH: number;
     let newS: number;
+    let tgtL: number;
 
-    const py = Math.floor(i / MASK_W);
-    const px = i % MASK_W;
+    // Use pixel Y position normalized to image height for gradient/art patterns
+    const py = Math.floor(i / srcW);
+    const yNorm = py / (srcH - 1);
 
     if (pattern === "gradient" && color2) {
-      // Interpolate between two colors based on y-position within the mask
-      const t = py / (MASK_H - 1);
-      newH = targetH1 + (targetH2 - targetH1) * t;
-      newS = (targetS1 + (targetS2 - targetS1) * t) * 0.7 + origS * 0.3;
+      newH = targetH1 + (targetH2 - targetH1) * yNorm;
+      newS =
+        (targetS1 + (targetS2 - targetS1) * yNorm) * 0.85 + origS * 0.15;
+      tgtL = targetL1 + (targetL2 - targetL1) * yNorm;
     } else if (pattern === "art" && color2) {
-      // French tip: top 25% uses second color, rest uses first
-      const tipThreshold = MASK_H * 0.25;
-      // In image coordinates, top of nail (free edge) is at lower y values
-      // But since the mask is from the model directly, we treat top rows as tip
-      if (py < tipThreshold) {
+      const tipThreshold = 0.25;
+      if (yNorm < tipThreshold) {
         newH = targetH2;
-        newS = targetS2 * 0.7 + origS * 0.3;
+        newS = targetS2 * 0.85 + origS * 0.15;
+        tgtL = targetL2;
       } else {
         newH = targetH1;
-        newS = targetS1 * 0.7 + origS * 0.3;
+        newS = targetS1 * 0.85 + origS * 0.15;
+        tgtL = targetL1;
       }
     } else {
-      // Solid color
       newH = targetH1;
-      newS = targetS1 * 0.7 + origS * 0.3;
+      newS = targetS1 * 0.85 + origS * 0.15;
+      tgtL = targetL1;
     }
 
-    const newL = origL; // preserve original lightness
+    // 80% target lightness + 20% original — opaque nail polish with slight texture
+    const newL = tgtL * 0.8 + origL * 0.2;
 
     const [nr, ng, nb] = hslToRgb(newH, newS, newL);
 
-    out[idx] = nr;
-    out[idx + 1] = ng;
-    out[idx + 2] = nb;
-    out[idx + 3] = (maskA * OPACITY * 255 + 0.5) | 0;
+    // Blend using mask alpha
+    outData[idx] = (origR * (1 - maskA) + nr * maskA + 0.5) | 0;
+    outData[idx + 1] = (origG * (1 - maskA) + ng * maskA + 0.5) | 0;
+    outData[idx + 2] = (origB * (1 - maskA) + nb * maskA + 0.5) | 0;
   }
 
-  // 10. Glitter overlay: add sparkle dots onto the recolor buffer
-  if (pattern === "glitter") {
-    const time = performance.now() * 0.001;
-    for (let si = 0; si < 40; si++) {
-      const seed = si * 7.31 + Math.floor(time * 2) * 0.1;
-      const gx = Math.floor(
-        ((Math.sin(seed * 3.7) * 0.5 + 0.5) * MASK_W) % MASK_W
-      );
-      const gy = Math.floor(
-        ((Math.cos(seed * 2.3) * 0.5 + 0.5) * MASK_H) % MASK_H
-      );
-      const bright = 0.5 + Math.sin(time * 3 + si) * 0.5;
+  outCtx.putImageData(outputImageData, 0, 0);
 
-      const gi = gy * MASK_W + gx;
-      const gIdx = gi * 4;
-      const gMaskA = blurAlpha[gIdx + 3] / 255;
-      if (gMaskA < 0.3) continue; // only add glitter where nail mask is present
+  // 12. Add glossy specular highlight on each detection's bbox
+  const scaleX = srcW / INPUT_SIZE;
+  const scaleY = srcH / INPUT_SIZE;
 
-      // Blend sparkle on top
-      const sparkleAlpha = bright * 0.7 * gMaskA;
-      const sparkleR = 255;
-      const sparkleG = 255;
-      const sparkleB = 200 + Math.floor(bright * 55);
+  // Use the upscaled mask canvas as a clip for specular highlights
+  for (const det of kept) {
+    const hlX = det.x * scaleX;
+    const hlY = (det.y - det.h * 0.15) * scaleY; // slightly above center
+    const hlRadius =
+      Math.max(det.w, det.h) * 0.4 * Math.max(scaleX, scaleY);
 
-      out[gIdx] = Math.min(
-        255,
-        Math.floor(out[gIdx] * (1 - sparkleAlpha) + sparkleR * sparkleAlpha)
-      );
-      out[gIdx + 1] = Math.min(
-        255,
-        Math.floor(
-          out[gIdx + 1] * (1 - sparkleAlpha) + sparkleG * sparkleAlpha
-        )
-      );
-      out[gIdx + 2] = Math.min(
-        255,
-        Math.floor(
-          out[gIdx + 2] * (1 - sparkleAlpha) + sparkleB * sparkleAlpha
-        )
-      );
-      // Keep existing alpha (don't increase beyond mask boundary)
-    }
+    outCtx.save();
+
+    // Clip to mask region: use the upscaled mask as a compositing mask
+    // We use destination-in approach: draw highlight to a temp canvas masked by nail region
+    const hlCanvas = document.createElement("canvas");
+    hlCanvas.width = srcW;
+    hlCanvas.height = srcH;
+    const hlCtx = hlCanvas.getContext("2d")!;
+
+    // Draw radial gradient highlight
+    const grad = hlCtx.createRadialGradient(hlX, hlY, 0, hlX, hlY, hlRadius);
+    grad.addColorStop(0, "rgba(255,255,255,0.35)");
+    grad.addColorStop(0.3, "rgba(255,255,255,0.1)");
+    grad.addColorStop(1, "rgba(255,255,255,0)");
+
+    hlCtx.fillStyle = grad;
+    hlCtx.fillRect(0, 0, srcW, srcH);
+
+    // Mask the highlight to only show within nail regions
+    hlCtx.globalCompositeOperation = "destination-in";
+    hlCtx.drawImage(upscaledMaskCanvas, 0, 0);
+
+    // Composite the masked highlight onto the output
+    outCtx.drawImage(hlCanvas, 0, 0);
+    outCtx.restore();
   }
 
-  recolorCtx!.putImageData(recolorData, 0, 0);
-
-  // 11. Single composite pass: draw recolored image (mirrored) onto the main canvas
-  ctx.save();
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = "high";
-  ctx.globalCompositeOperation = "source-over";
-  ctx.scale(-1, 1);
-  ctx.drawImage(recolorCanvas!, -vidW, 0, vidW, vidH);
-  ctx.restore();
+  // 13. Return the output canvas
+  return outputCanvas;
 }
 
 export function destroyNailEngine(): void {
   session?.release();
   session = null;
-  preprocessCanvas = null;
-  preprocessCtx = null;
-  rawMaskCanvas = null;
-  rawMaskCtx = null;
-  smoothMaskCanvas = null;
-  smoothMaskCtx = null;
-  videoSampleCanvas = null;
-  videoSampleCtx = null;
-  recolorCanvas = null;
-  recolorCtx = null;
-  prevAlpha = null;
-  cachedCombinedMask = null;
-  pendingInference = false;
 }
