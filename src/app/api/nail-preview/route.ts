@@ -58,13 +58,18 @@ You are given THREE images:
 
 INPAINTING RULE: ONLY modify the WHITE areas in the mask (the nails). Keep ALL black-masked areas (skin, background, everything else) EXACTLY unchanged from the original photo. The mask precisely defines where nails are — trust it completely.
 
-IMPORTANT about the third image (nail film samples):
-- The third image shows 5 nail films laid out in a row, ordered from LEFT to RIGHT: THUMB, INDEX, MIDDLE, RING, PINKY
-- The LEFTMOST (largest/widest) film is for the THUMB, the RIGHTMOST (smallest/narrowest) is for the PINKY
-- The WIDER/ROUNDER end of each nail film is the cuticle side (attaches near the knuckle)
-- The NARROWER/POINTED end is the fingertip side
+CRITICAL — ORIENTATION OF THE NAIL FILM SAMPLES (third image):
+- The third image shows 5 nail films laid out VERTICALLY in a row
+- Order from LEFT to RIGHT: THUMB, INDEX, MIDDLE, RING, PINKY
+- EACH NAIL FILM HAS TWO ENDS:
+  * TOP end (in the sample image) = CUTICLE side = the end that attaches near the knuckle = WIDER/ROUNDER
+  * BOTTOM end (in the sample image) = FINGERTIP side = the free edge = NARROWER/POINTED
+- When applying to the hand photo:
+  * The TOP of the sample nail → goes toward the KNUCKLE (cuticle area) on the real finger
+  * The BOTTOM of the sample nail → goes toward the FINGERTIP on the real finger
+- DO NOT FLIP OR REVERSE the nail design. If the sample has decorations at the BOTTOM (fingertip end), those decorations MUST appear at the FINGERTIP of the result, NOT at the cuticle.
+- If the sample has a gradient that goes from light (top/cuticle) to dark (bottom/tip), the result must ALSO go from light (cuticle) to dark (tip). NEVER reverse the gradient direction.
 - Apply each film to the CORRECT finger: thumb design → thumb nail, index design → index nail, etc.
-- Each finger's design may have slightly different patterns or sizes — match them accurately per finger
 
 Apply the nail art design from the third image onto ONLY the white-masked nail areas in the first image.
 - ONLY modify pixels that fall within the WHITE mask regions
