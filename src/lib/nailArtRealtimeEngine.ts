@@ -115,9 +115,10 @@ function isBackOfHand(
   // Cross product z-component: v1 x v2
   const cross = v1x * v2y - v1y * v2x;
 
-  // For a "Left" label from MediaPipe (which is the right hand in mirrored view),
-  // positive cross => back of hand visible
-  const rawBack = handedness === "Left" ? cross > 0 : cross < 0;
+  // MediaPipe handedness in selfie view:
+  // "Right" + cross > 0 → back of hand (nails visible)
+  // "Left" + cross < 0 → back of hand (nails visible)
+  const rawBack = handedness === "Right" ? cross > 0 : cross < 0;
 
   // Hysteresis: only flip state if cross magnitude exceeds dead zone
   const prev = prevBackOfHand.get(handKey);
@@ -386,7 +387,7 @@ export function renderRealtimeNailArt(
     for (const finger of FINGERS) {
       const regionKey = `${handKey}_${finger.name}`;
 
-      // Compute raw nail region
+      // Compute raw nail region (in original video coordinates)
       const rawRegion = computeNailRegion(
         landmarks,
         finger,
@@ -394,6 +395,10 @@ export function renderRealtimeNailArt(
         h,
         confidence
       );
+
+      // Mirror to match the flipped video display
+      rawRegion.cx = w - rawRegion.cx;
+      rawRegion.angle = Math.PI - rawRegion.angle;
 
       // Temporal smoothing
       const prev = prevRegions.get(regionKey);
