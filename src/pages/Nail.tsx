@@ -1,5 +1,5 @@
 import { useState, useRef } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 
 const SAMPLES = [
   { id: 1, sample: "/beauty/nail-designs/sample1.jpeg", name: "기본" },
@@ -17,6 +17,7 @@ export default function NailPage() {
   const [error, setError] = useState<string | null>(null);
   const [popupSrc, setPopupSrc] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const navigate = useNavigate();
 
   // Upload photo
   const handleUpload = () => {
@@ -171,6 +172,12 @@ export default function NailPage() {
                 className="w-full px-8 py-3 bg-gray-700 hover:bg-gray-600 text-white rounded-full font-medium transition-colors"
               >
                 🖼️ 기본 사진 사용
+              </button>
+              <button
+                onClick={() => navigate("/nail-demo")}
+                className="w-full px-8 py-3 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-full font-medium transition-colors border border-gray-700"
+              >
+                🎨 Demo 보기
               </button>
             </div>
           </div>
