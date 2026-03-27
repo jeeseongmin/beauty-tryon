@@ -126,7 +126,7 @@ export default function NailPage() {
       </header>
 
       {/* Main area */}
-      <div className={`flex-1 relative flex items-center justify-center bg-black ${uploadedPhoto ? "pb-36" : ""}`}>
+      <div className="flex-1 relative flex items-center justify-center bg-black overflow-auto">
 
         {/* Landing */}
         {!uploadedPhoto && (
@@ -187,9 +187,9 @@ export default function NailPage() {
         )}
       </div>
 
-      {/* Bottom panel — sample palette + preview button */}
+      {/* Bottom panel — sample palette + preview button (not fixed, part of flow) */}
       {uploadedPhoto && (
-        <div className="fixed bottom-0 left-0 right-0 bg-gray-900 border-t border-gray-800 z-50">
+        <div className="bg-gray-900 border-t border-gray-800 flex-shrink-0">
           <div className="px-4 pt-3 pb-2">
             <p className="text-[10px] text-gray-500 mb-2">네일 디자인 선택 (더블클릭으로 확대)</p>
             <div className="flex gap-3 overflow-x-auto scrollbar-hide">
