@@ -61,6 +61,9 @@ export default function NailPage() {
 
     try {
       // Send photo + sample to Gemini API (Gemini detects nails directly)
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 120_000); // 2분 타임아웃
+
       const res = await fetch("/beauty/api/nail-preview", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -68,8 +71,10 @@ export default function NailPage() {
           handPhoto: uploadedPhoto,
           sampleId: selectedId,
         }),
+        signal: controller.signal,
       });
 
+      clearTimeout(timeout);
       const data = await res.json();
 
       if (!res.ok) {
@@ -78,8 +83,12 @@ export default function NailPage() {
       }
 
       setResultImage(data.image);
-    } catch (err) {
-      setError("서버 연결에 실패했습니다");
+    } catch (err: any) {
+      if (err?.name === "AbortError") {
+        setError("요청 시간이 초과되었습니다. 다시 시도해주세요.");
+      } else {
+        setError("서버 연결에 실패했습니다");
+      }
       console.error(err);
     } finally {
       setProcessing(false);
@@ -193,7 +202,7 @@ export default function NailPage() {
               <p className="text-gray-300 text-sm mb-1">
                 AI가 네일 디자인을 적용하고 있습니다...
               </p>
-              <p className="text-gray-500 text-xs">약 5~10초 소요</p>
+              <p className="text-gray-500 text-xs">약 30초~1분 소요</p>
             </div>
           </div>
         )}

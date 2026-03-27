@@ -41,6 +41,8 @@ app.post("/beauty/api/nail-preview", async (req, res) => {
       },
     });
 
+    console.log(`[nail-preview] Starting Gemini request for sample ${sampleId}...`);
+    const startTime = Date.now();
     const result = await model.generateContent([
       {
         inlineData: {
@@ -119,6 +121,7 @@ Return ONLY the edited image.`,
       },
     ]);
 
+    console.log(`[nail-preview] Gemini responded in ${((Date.now() - startTime) / 1000).toFixed(1)}s`);
     const response = result.response;
     const parts = response.candidates?.[0]?.content?.parts;
 
