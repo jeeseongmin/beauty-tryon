@@ -79,7 +79,8 @@ export default function NailPage() {
     return () => {
       running = false;
     };
-  }, [mode, realtimeReady, cameraReady, selectedDesign, videoRef]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, realtimeReady, cameraReady, selectedDesign]);
 
   // ── Photo mode ─────────────────────────────────────────────────────────────
 
