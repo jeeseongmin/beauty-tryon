@@ -87,8 +87,17 @@ Return ONLY the edited image.`,
     for (const part of parts) {
       if (part.inlineData) {
         const imageData = part.inlineData;
+
+        // Save result to server
+        const resultDir = join(__dirname, "public", "nail-designs", "result");
+        if (!existsSync(resultDir)) mkdirSync(resultDir, { recursive: true });
+        const filename = `sample${sampleId}_${Date.now()}.jpeg`;
+        writeFileSync(join(resultDir, filename), Buffer.from(imageData.data, "base64"));
+        console.log(`[nail-preview] Saved to result/${filename}`);
+
         return res.json({
           image: `data:${imageData.mimeType};base64,${imageData.data}`,
+          savedPath: `/beauty/nail-designs/result/${filename}`,
         });
       }
     }
