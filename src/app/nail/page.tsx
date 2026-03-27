@@ -69,7 +69,7 @@ export default function NailPage() {
       const maskDataUrl = await generateNailMask(img);
 
       // Step 2: Send photo + mask + sample to Gemini API
-      const res = await fetch("/api/nail-preview", {
+      const res = await fetch("/beauty/api/nail-preview", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
