@@ -359,6 +359,12 @@ export function renderRealtimeNailArt(
   const w = ctx.canvas.width;
   const h = ctx.canvas.height;
 
+  // Draw mirrored video frame first
+  ctx.save();
+  ctx.scale(-1, 1);
+  ctx.drawImage(video, -w, 0, w, h);
+  ctx.restore();
+
   if (!handLandmarker) return;
 
   // Detect hands
