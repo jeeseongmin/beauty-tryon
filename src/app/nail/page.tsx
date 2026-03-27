@@ -46,41 +46,62 @@ export default function NailPage() {
   };
 
   // Real-time render loop
+  const selectedDesignRef = useRef<NailDesign | null>(null);
+  selectedDesignRef.current = selectedDesign;
+
   useEffect(() => {
-    if (mode !== "realtime" || !realtimeReady || !cameraReady || !canvasRef.current || !videoRef.current) return;
+    if (mode !== "realtime" || !realtimeReady || !cameraReady) return;
 
     const canvas = canvasRef.current;
-    const ctx = canvas.getContext("2d")!;
     const video = videoRef.current;
+    if (!canvas || !video) return;
 
-    canvas.width = video.videoWidth || 640;
-    canvas.height = video.videoHeight || 480;
+    const ctx = canvas.getContext("2d")!;
+    let rafId = 0;
 
-    let running = true;
     const render = () => {
-      if (!running) return;
-      // Re-sync dimensions when video metadata arrives
-      if (video.videoWidth && canvas.width !== video.videoWidth) {
+      // Sync canvas size with video
+      if (video.videoWidth && video.videoWidth !== canvas.width) {
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
       }
-      if (selectedDesign) {
-        renderRealtimeNailArt(ctx, video, selectedDesign.colors, selectedDesign.pattern);
-      } else {
+
+      const design = selectedDesignRef.current;
+      if (design) {
+        renderRealtimeNailArt(ctx, video, design.colors, design.pattern);
+      } else if (video.readyState >= 2) {
         ctx.save();
         ctx.scale(-1, 1);
         ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
         ctx.restore();
       }
-      requestAnimationFrame(render);
+
+      rafId = requestAnimationFrame(render);
     };
-    render();
+
+    // Wait for video to have data before starting loop
+    if (video.readyState >= 2) {
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      render();
+    } else {
+      const onReady = () => {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        render();
+      };
+      video.addEventListener("loadeddata", onReady, { once: true });
+      return () => {
+        video.removeEventListener("loadeddata", onReady);
+        cancelAnimationFrame(rafId);
+      };
+    }
 
     return () => {
-      running = false;
+      cancelAnimationFrame(rafId);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, realtimeReady, cameraReady, selectedDesign]);
+  }, [mode, realtimeReady, cameraReady]);
 
   // ── Photo mode ─────────────────────────────────────────────────────────────
 
