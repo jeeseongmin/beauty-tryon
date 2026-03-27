@@ -22,6 +22,8 @@ const FINISHES = [
   { id: "shimmer", name: "쉬머", desc: "펄" },
   { id: "glitter", name: "글리터", desc: "반짝이" },
   { id: "chrome", name: "크롬", desc: "메탈릭" },
+  { id: "syrup", name: "시럽", desc: "투명젤리" },
+  { id: "magnet", name: "자석", desc: "캣아이" },
 ];
 
 export default function NailCustomPage() {
