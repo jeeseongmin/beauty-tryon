@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
     const handBase64 = handPhoto.replace(/^data:image\/\w+;base64,/, "");
 
     const model = genAI.getGenerativeModel({
-      model: "gemini-2.0-flash-exp",
+      model: "gemini-2.5-flash-image",
       generationConfig: {
         responseModalities: ["image", "text"],
       } as any,
