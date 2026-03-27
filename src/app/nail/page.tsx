@@ -26,7 +26,7 @@ export default function NailPage() {
   const [loading, setLoading] = useState(false);
 
   // Real-time mode
-  const { videoRef, start, stop } = useCamera({ facingMode: "user", width: 1280, height: 960 });
+  const { videoRef, isReady: cameraReady, start, stop } = useCamera({ facingMode: "user", width: 640, height: 480 });
   const [realtimeReady, setRealtimeReady] = useState(false);
 
   // Photo mode
@@ -47,7 +47,7 @@ export default function NailPage() {
 
   // Real-time render loop
   useEffect(() => {
-    if (mode !== "realtime" || !realtimeReady || !canvasRef.current || !videoRef.current) return;
+    if (mode !== "realtime" || !realtimeReady || !cameraReady || !canvasRef.current || !videoRef.current) return;
 
     const canvas = canvasRef.current;
     const ctx = canvas.getContext("2d")!;
@@ -79,7 +79,7 @@ export default function NailPage() {
     return () => {
       running = false;
     };
-  }, [mode, realtimeReady, selectedDesign, videoRef]);
+  }, [mode, realtimeReady, cameraReady, selectedDesign, videoRef]);
 
   // ── Photo mode ─────────────────────────────────────────────────────────────
 
@@ -263,7 +263,7 @@ export default function NailPage() {
       </header>
 
       {/* Main content */}
-      <div className="flex-1 relative flex items-center justify-center bg-black">
+      <div className={`flex-1 relative flex items-center justify-center bg-black ${showPalette ? "pb-20" : ""}`}>
         {/* Landing */}
         {mode === "landing" && (
           <div className="text-center p-8">
@@ -297,10 +297,12 @@ export default function NailPage() {
           </div>
         )}
 
+        {/* Hidden video element — always in DOM so useCamera ref works */}
+        <video ref={videoRef} className="hidden" playsInline muted />
+
         {/* Real-time mode */}
         {mode === "realtime" && (
           <>
-            <video ref={videoRef} className="hidden" playsInline muted />
             <canvas
               ref={canvasRef}
               className="max-w-full max-h-full object-contain"
@@ -409,9 +411,9 @@ export default function NailPage() {
         )}
       </div>
 
-      {/* Nail palette */}
+      {/* Nail palette — fixed at bottom */}
       {showPalette && (
-        <div className="bg-gray-900 px-4 py-4 border-t border-gray-800">
+        <div className="fixed bottom-0 left-0 right-0 bg-gray-900 px-4 py-4 border-t border-gray-800 z-50">
           <NailPalette
             designs={nailDesigns}
             selectedId={selectedDesign?.id ?? null}
