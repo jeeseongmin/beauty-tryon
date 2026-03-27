@@ -82,10 +82,16 @@ CRITICAL — REPRODUCE THE DESIGN EXACTLY:
 - The design must FULLY COVER each nail from cuticle to tip — no bare/unpainted nail should be visible
 - Each finger's design should match its corresponding sample nail (left=thumb through right=pinky)
 
-NAIL SHAPE & LENGTH:
+NAIL SHAPE, TIP THICKNESS & LENGTH:
 - The nail shape MUST match the sample: almond, square, round, coffin, stiletto, etc.
+- The nail TIP THICKNESS must match the sample exactly — if the sample nail tip tapers to a thin/sharp point, the result must also taper to a thin/sharp point. If the sample tip is wide/blunt, the result must be wide/blunt.
 - The nail length MUST match the sample proportions
 - If the sample nails extend past the fingertip, the result nails should extend past the fingertip too
+
+HAND RECOGNITION:
+- Detect whatever nails are visible in the hand photo, but do NOT assume all 5 fingers are always visible
+- If only some fingers/nails are visible, only apply the design to those visible nails
+- If no nails are clearly visible, return the original photo unchanged
 
 COMPOSITION:
 - Keep the EXACT same framing, zoom level, and composition as the original photo
