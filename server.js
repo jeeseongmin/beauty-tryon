@@ -1,6 +1,6 @@
 const express = require("express");
 const cors = require("cors");
-const { readFileSync } = require("fs");
+const { readFileSync, existsSync } = require("fs");
 const { join } = require("path");
 
 // Load env
@@ -9,7 +9,8 @@ require("dotenv").config({ path: ".env.local" });
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 3000;
+const isDev = process.env.NODE_ENV !== "production";
 
 app.use(cors());
 app.use(express.json({ limit: "50mb" }));
@@ -144,19 +145,32 @@ Return ONLY the edited image.`,
   }
 });
 
-// Static files (production)
-app.use("/beauty", express.static(join(__dirname, "dist")));
+async function startServer() {
+  if (isDev) {
+    // Development: use Vite as middleware (single port!)
+    const { createServer } = await import("vite");
+    const vite = await createServer({
+      server: { middlewareMode: true },
+      appType: "spa",
+    });
+    app.use(vite.middlewares);
+  } else {
+    // Production: serve built files
+    app.use("/beauty", express.static(join(__dirname, "dist")));
 
-// SPA fallback
-app.get("/beauty/{*splat}", (_req, res) => {
-  res.sendFile(join(__dirname, "dist", "index.html"));
-});
+    app.get("/beauty/{*splat}", (_req, res) => {
+      res.sendFile(join(__dirname, "dist", "index.html"));
+    });
+  }
 
-// Root redirect
-app.get("/", (_req, res) => {
-  res.redirect("/beauty");
-});
+  // Root redirect
+  app.get("/", (_req, res) => {
+    res.redirect("/beauty");
+  });
 
-app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
-});
+  app.listen(PORT, () => {
+    console.log(`Server running on http://localhost:${PORT}/beauty/`);
+  });
+}
+
+startServer();
