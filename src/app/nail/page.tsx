@@ -149,12 +149,12 @@ export default function NailPage() {
 
         {/* Display image */}
         {displayImage && (
-          <div className="relative w-full h-full flex items-center justify-center p-4">
+          <div className="relative w-full flex items-center justify-center">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={displayImage}
               alt="네일 아트 결과"
-              className="max-w-full max-h-full object-contain rounded-lg"
+              className="w-full object-contain"
             />
 
             {/* Result badge */}
