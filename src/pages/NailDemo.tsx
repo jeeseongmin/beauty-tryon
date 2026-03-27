@@ -43,7 +43,7 @@ export default function NailDemoPage() {
           <img
             src={current.after}
             alt={`네일 아트 ${current.name}`}
-            className="max-w-full max-h-full object-contain"
+            className="w-full h-full object-contain"
           />
           <div className="absolute top-4 left-4 bg-purple-500/80 rounded-full px-3 py-1 backdrop-blur">
             <span className="text-xs font-medium">{current.name} 적용</span>
