@@ -34,7 +34,34 @@ const FINISHES = [
   { id: "magnet", name: "자석", desc: "캣아이" },
 ];
 
+const STEPS = [
+  { label: "사진 선택" },
+  { label: "디자인 선택" },
+];
+
 type Mode = null | "solid" | "art";
+
+function Stepper({ current }: { current: number }) {
+  return (
+    <div className="flex items-center justify-center gap-2 px-4 py-2 bg-gray-900/50">
+      {STEPS.map((step, i) => (
+        <div key={i} className="flex items-center gap-2">
+          <div className={`flex items-center gap-1.5 ${i <= current ? "text-white" : "text-gray-600"}`}>
+            <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
+              i < current ? "bg-purple-500" : i === current ? "bg-purple-500" : "bg-gray-700"
+            }`}>
+              {i < current ? "✓" : i + 1}
+            </div>
+            <span className="text-xs font-medium">{step.label}</span>
+          </div>
+          {i < STEPS.length - 1 && (
+            <div className={`w-8 h-px ${i < current ? "bg-purple-500" : "bg-gray-700"}`} />
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export default function NailPage() {
   const [uploadedPhoto, setUploadedPhoto] = useState<string | null>(null);
@@ -52,6 +79,9 @@ export default function NailPage() {
   const [selectedColor, setSelectedColor] = useState(COLOR_PRESETS[0].hex);
   const [customColor, setCustomColor] = useState(COLOR_PRESETS[0].hex);
   const [selectedFinish, setSelectedFinish] = useState("glossy");
+
+  // Current step: 0 = photo, 1 = design
+  const currentStep = !uploadedPhoto ? 0 : 1;
 
   const handleUpload = () => fileInputRef.current?.click();
 
@@ -191,6 +221,9 @@ export default function NailPage() {
         </div>
       </header>
 
+      {/* Stepper */}
+      <Stepper current={currentStep} />
+
       {/* Main area */}
       <div className="flex-1 min-h-0 relative flex items-center justify-center bg-black overflow-hidden">
         {/* Landing — no photo yet */}
@@ -247,7 +280,7 @@ export default function NailPage() {
       {uploadedPhoto && (
         <div className="bg-gray-900 border-t border-gray-800 flex-shrink-0">
 
-          {/* Mode select — photo uploaded but no mode chosen */}
+          {/* Mode select */}
           {!mode && !resultImage && (
             <div className="px-4 py-4">
               <p className="text-xs text-gray-400 text-center mb-3">디자인 방식을 선택하세요</p>
@@ -257,7 +290,7 @@ export default function NailPage() {
                   className="flex-1 py-4 rounded-xl bg-gray-800 hover:bg-gray-700 border border-gray-700 transition-colors text-center"
                 >
                   <span className="text-2xl block mb-1">🎨</span>
-                  <span className="text-sm font-semibold block">단색 디자인</span>
+                  <span className="text-sm font-semibold block">원컬러</span>
                   <span className="text-[10px] text-gray-500">컬러 + 광택 선택</span>
                 </button>
                 <button
@@ -311,7 +344,6 @@ export default function NailPage() {
           {mode === "solid" && (
             <>
               <div className="px-4 pt-3 pb-2 space-y-3">
-                {/* Color picker */}
                 <div>
                   <p className="text-[10px] text-gray-500 mb-2">컬러 선택</p>
                   <div className="flex items-center gap-2">
@@ -337,8 +369,6 @@ export default function NailPage() {
                     />
                   </div>
                 </div>
-
-                {/* Finish selector */}
                 <div>
                   <p className="text-[10px] text-gray-500 mb-2">광택</p>
                   <div className="flex gap-1.5 overflow-x-auto scrollbar-hide">
@@ -374,7 +404,7 @@ export default function NailPage() {
             </>
           )}
 
-          {/* Result shown — show mode select again */}
+          {/* Result shown */}
           {resultImage && (
             <div className="px-4 py-3">
               <button
