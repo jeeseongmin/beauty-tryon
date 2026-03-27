@@ -63,8 +63,19 @@ You are given TWO images:
 
 YOUR TASK: Detect the fingernails in the hand photo, then apply the nail art design from the second image onto those nails.
 
-NAIL DETECTION:
-- Automatically find all visible fingernails in the hand photo
+HAND PHOTO ANALYSIS (first image):
+- First, determine the HAND ORIENTATION: which direction is up/down, and whether it's a left or right hand
+- The photo may be taken from ANY angle — top-down, side view, palm-up, palm-down, fingers pointing up/down/left/right
+- Identify EACH visible finger: thumb, index, middle, ring, pinky
+  * Use finger thickness, length, spacing, and position relative to the palm to distinguish them
+  * The THUMB is the thickest, shortest, and set apart from the other four fingers
+  * The INDEX finger is next to the thumb
+  * The MIDDLE finger is the longest
+  * The RING finger is between middle and pinky
+  * The PINKY is the thinnest and shortest of the four non-thumb fingers
+- For EACH nail, identify its orientation:
+  * CUTICLE end = where the nail meets the skin near the knuckle
+  * FREE EDGE (tip) = the end of the nail furthest from the hand
 - ONLY modify the nail areas — keep skin, background, and everything else EXACTLY unchanged
 - If only some fingers are visible, only apply to those visible nails
 - If no nails are clearly visible, return the original photo unchanged
@@ -74,9 +85,18 @@ NAIL FILM SAMPLE ORIENTATION (second image):
 - Order from LEFT to RIGHT: THUMB, INDEX, MIDDLE, RING, PINKY
 - TOP end = CUTICLE side (wider/rounder, attaches near knuckle)
 - BOTTOM end = FINGERTIP side (narrower/pointed, the free edge)
-- When applying: TOP of sample → cuticle area, BOTTOM of sample → fingertip
+- When applying to the hand photo, MATCH ORIENTATION CORRECTLY:
+  * TOP of sample nail (cuticle end) → cuticle area of the real nail
+  * BOTTOM of sample nail (free edge) → fingertip/free edge of the real nail
+  * This mapping must be correct REGARDLESS of the hand photo's rotation or angle
 - DO NOT FLIP OR REVERSE the design direction
-- Apply each film to its CORRECT finger (thumb design → thumb, etc.)
+- Apply each film to its CORRECT finger:
+  * Leftmost sample (1st) → THUMB
+  * 2nd sample → INDEX finger
+  * 3rd sample → MIDDLE finger
+  * 4th sample → RING finger
+  * Rightmost sample (5th) → PINKY
+- If the hand is a LEFT hand vs RIGHT hand, still match thumb-to-thumb, pinky-to-pinky
 
 REPRODUCE THE DESIGN EXACTLY:
 - Copy EVERY detail: colors, gradients, patterns, decorations, glitter, metallic parts, 3D elements, jewels, lines, dots
