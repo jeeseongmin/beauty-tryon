@@ -44,6 +44,20 @@ export default function NailPage() {
     e.target.value = "";
   };
 
+  // Use sample photo
+  const useSamplePhoto = async () => {
+    const res = await fetch("/beauty/nail-designs/sample.jpg");
+    const blob = await res.blob();
+    const reader = new FileReader();
+    reader.onload = () => {
+      setUploadedPhoto(reader.result as string);
+      setResultImage(null);
+      setSelectedId(null);
+      setError(null);
+    };
+    reader.readAsDataURL(blob);
+  };
+
   // Generate preview via ONNX mask + Gemini
   const generatePreview = async () => {
     if (!uploadedPhoto || !selectedId) return;
@@ -156,12 +170,20 @@ export default function NailPage() {
               <br />
               AI가 선택한 네일 디자인을 입혀드립니다.
             </p>
-            <button
-              onClick={handleUpload}
-              className="px-8 py-4 bg-purple-500 hover:bg-purple-600 text-white rounded-full font-semibold transition-colors"
-            >
-              📷 사진 업로드
-            </button>
+            <div className="flex flex-col gap-3 max-w-xs mx-auto">
+              <button
+                onClick={handleUpload}
+                className="w-full px-8 py-4 bg-purple-500 hover:bg-purple-600 text-white rounded-full font-semibold transition-colors"
+              >
+                📷 사진 업로드
+              </button>
+              <button
+                onClick={useSamplePhoto}
+                className="w-full px-8 py-3 bg-gray-700 hover:bg-gray-600 text-white rounded-full font-medium transition-colors"
+              >
+                🖼️ 기본 사진 사용
+              </button>
+            </div>
           </div>
         )}
 
