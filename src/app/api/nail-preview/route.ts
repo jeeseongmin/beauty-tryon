@@ -7,10 +7,10 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
 export async function POST(req: NextRequest) {
   try {
-    const { handPhoto, sampleId } = await req.json();
+    const { handPhoto, maskImage, sampleId } = await req.json();
 
-    if (!handPhoto || !sampleId) {
-      return NextResponse.json({ error: "Missing handPhoto or sampleId" }, { status: 400 });
+    if (!handPhoto || !maskImage || !sampleId) {
+      return NextResponse.json({ error: "Missing handPhoto, maskImage, or sampleId" }, { status: 400 });
     }
 
     // Read sample design image from public folder
@@ -18,8 +18,9 @@ export async function POST(req: NextRequest) {
     const sampleBuffer = readFileSync(samplePath);
     const sampleBase64 = sampleBuffer.toString("base64");
 
-    // Strip data URL prefix from hand photo
+    // Strip data URL prefix from hand photo and mask
     const handBase64 = handPhoto.replace(/^data:image\/\w+;base64,/, "");
+    const maskBase64 = maskImage.replace(/^data:image\/\w+;base64,/, "");
 
     const model = genAI.getGenerativeModel({
       model: "gemini-2.5-flash-image",
@@ -37,26 +38,37 @@ export async function POST(req: NextRequest) {
       },
       {
         inlineData: {
+          mimeType: "image/png",
+          data: maskBase64,
+        },
+      },
+      {
+        inlineData: {
           mimeType: "image/jpeg",
           data: sampleBase64,
         },
       },
       {
-        text: `You are a professional nail art editor.
+        text: `You are a professional nail art inpainting editor.
 
-The first image is a photo of a hand/nails. The second image shows nail art film/tip samples laid out in a row.
+You are given THREE images:
+1. FIRST image: Original hand photo
+2. SECOND image: A mask image where WHITE areas = nail regions, BLACK areas = everything else
+3. THIRD image: Nail art film/tip design samples laid out in a row
 
-IMPORTANT about the second image (nail film samples):
-- The second image shows 5 nail films laid out in a row, ordered from LEFT to RIGHT: THUMB, INDEX, MIDDLE, RING, PINKY
+INPAINTING RULE: ONLY modify the WHITE areas in the mask (the nails). Keep ALL black-masked areas (skin, background, everything else) EXACTLY unchanged from the original photo. The mask precisely defines where nails are — trust it completely.
+
+IMPORTANT about the third image (nail film samples):
+- The third image shows 5 nail films laid out in a row, ordered from LEFT to RIGHT: THUMB, INDEX, MIDDLE, RING, PINKY
 - The LEFTMOST (largest/widest) film is for the THUMB, the RIGHTMOST (smallest/narrowest) is for the PINKY
 - The WIDER/ROUNDER end of each nail film is the cuticle side (attaches near the knuckle)
 - The NARROWER/POINTED end is the fingertip side
 - Apply each film to the CORRECT finger: thumb design → thumb nail, index design → index nail, etc.
 - Each finger's design may have slightly different patterns or sizes — match them accurately per finger
 
-Apply the nail art design from the second image onto the nails in the first image.
-- Keep the hand, skin, and background EXACTLY the same — do not alter anything except the nails
-- Only change the nails to match the design pattern/color/art from the second image
+Apply the nail art design from the third image onto ONLY the white-masked nail areas in the first image.
+- ONLY modify pixels that fall within the WHITE mask regions
+- Everything outside the white mask must remain pixel-perfect identical to the original photo
 
 CRITICAL — REPRODUCE THE DESIGN EXACTLY:
 - Copy EVERY detail from the sample: colors, gradients, patterns, decorations, glitter, metallic parts, 3D elements, jewels, lines, dots — everything visible on each sample nail

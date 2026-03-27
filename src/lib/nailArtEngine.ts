@@ -628,6 +628,123 @@ export async function processNailPhoto(
   return outputCanvas;
 }
 
+/**
+ * Generate a nail mask image from a hand photo.
+ * Returns a base64 data URL of a black & white mask (white = nails, black = background)
+ * at the original image resolution.
+ */
+export async function generateNailMask(
+  image: HTMLImageElement | HTMLCanvasElement
+): Promise<string> {
+  if (!session || !ort) {
+    throw new Error("Nail engine not initialized.");
+  }
+
+  const srcW = image instanceof HTMLImageElement ? image.naturalWidth : image.width;
+  const srcH = image instanceof HTMLImageElement ? image.naturalHeight : image.height;
+
+  // 1. Preprocess: draw to 320x320
+  const preprocessCanvas = document.createElement("canvas");
+  preprocessCanvas.width = INPUT_SIZE;
+  preprocessCanvas.height = INPUT_SIZE;
+  const preprocessCtx = preprocessCanvas.getContext("2d", { willReadFrequently: true })!;
+  preprocessCtx.drawImage(image, 0, 0, INPUT_SIZE, INPUT_SIZE);
+  const imageData = preprocessCtx.getImageData(0, 0, INPUT_SIZE, INPUT_SIZE);
+  const { data } = imageData;
+
+  const input = new Float32Array(3 * INPUT_SIZE * INPUT_SIZE);
+  const pixelCount = INPUT_SIZE * INPUT_SIZE;
+  for (let i = 0; i < pixelCount; i++) {
+    input[i] = data[i * 4] / 255;
+    input[pixelCount + i] = data[i * 4 + 1] / 255;
+    input[2 * pixelCount + i] = data[i * 4 + 2] / 255;
+  }
+
+  const tensor = new ort.Tensor("float32", input, [1, 3, INPUT_SIZE, INPUT_SIZE]);
+
+  // 2. Run ONNX inference
+  const results = await session.run({ images: tensor });
+  const o0dims = results["output0"].dims;
+  const o1dims = results["output1"].dims;
+
+  if (o0dims[1] !== 37 || o0dims[2] !== 2100 || o1dims[1] !== 32) {
+    tensor.dispose?.();
+    for (const t of Object.values(results)) (t as any).dispose?.();
+    throw new Error("Unexpected ONNX output shape");
+  }
+
+  const output0Data = results["output0"].data as Float32Array;
+  const output1Data = new Float32Array(results["output1"].data as Float32Array);
+
+  tensor.dispose?.();
+  for (const t of Object.values(results)) (t as any).dispose?.();
+
+  // 3. Parse detections + NMS
+  const detections: Detection[] = [];
+  for (let i = 0; i < NUM_DETECTIONS; i++) {
+    const conf = output0Data[4 * NUM_DETECTIONS + i];
+    if (conf < CONF_THRESHOLD) continue;
+    const x = output0Data[0 * NUM_DETECTIONS + i];
+    const y = output0Data[1 * NUM_DETECTIONS + i];
+    const w = output0Data[2 * NUM_DETECTIONS + i];
+    const h = output0Data[3 * NUM_DETECTIONS + i];
+    const maskCoeffs = new Float32Array(NUM_MASK_COEFFS);
+    for (let j = 0; j < NUM_MASK_COEFFS; j++) {
+      maskCoeffs[j] = output0Data[(5 + j) * NUM_DETECTIONS + i];
+    }
+    detections.push({ x, y, w, h, conf, maskCoeffs });
+  }
+  const kept = nms(detections);
+
+  // 4. Compute combined mask at 80x80
+  const combinedMask = new Float32Array(MASK_W * MASK_H);
+  const maskScale = MASK_W / INPUT_SIZE;
+  for (const det of kept) {
+    const bx1 = Math.max(0, Math.floor((det.x - det.w / 2) * maskScale));
+    const by1 = Math.max(0, Math.floor((det.y - det.h / 2) * maskScale));
+    const bx2 = Math.min(MASK_W, Math.ceil((det.x + det.w / 2) * maskScale));
+    const by2 = Math.min(MASK_H, Math.ceil((det.y + det.h / 2) * maskScale));
+    for (let py = by1; py < by2; py++) {
+      for (let px = bx1; px < bx2; px++) {
+        let val = 0;
+        for (let k = 0; k < NUM_MASK_COEFFS; k++) {
+          val += det.maskCoeffs[k] * output1Data[k * MASK_W * MASK_H + py * MASK_W + px];
+        }
+        val = 1 / (1 + Math.exp(-val));
+        combinedMask[py * MASK_W + px] = Math.max(combinedMask[py * MASK_W + px], val);
+      }
+    }
+  }
+
+  // 5. Render mask at 80x80 (white nails on black background)
+  const maskCanvas80 = document.createElement("canvas");
+  maskCanvas80.width = MASK_W;
+  maskCanvas80.height = MASK_H;
+  const maskCtx80 = maskCanvas80.getContext("2d")!;
+  const maskImgData = maskCtx80.createImageData(MASK_W, MASK_H);
+  const md = maskImgData.data;
+  for (let i = 0; i < MASK_W * MASK_H; i++) {
+    const v = combinedMask[i] > 0.5 ? 255 : 0; // binary threshold
+    md[i * 4] = v;
+    md[i * 4 + 1] = v;
+    md[i * 4 + 2] = v;
+    md[i * 4 + 3] = 255;
+  }
+  maskCtx80.putImageData(maskImgData, 0, 0);
+
+  // 6. Upscale to original resolution with smoothing
+  const maskCanvasFull = document.createElement("canvas");
+  maskCanvasFull.width = srcW;
+  maskCanvasFull.height = srcH;
+  const maskCtxFull = maskCanvasFull.getContext("2d")!;
+  maskCtxFull.imageSmoothingEnabled = true;
+  maskCtxFull.imageSmoothingQuality = "high";
+  maskCtxFull.drawImage(maskCanvas80, 0, 0, srcW, srcH);
+
+  // 7. Return as base64 data URL
+  return maskCanvasFull.toDataURL("image/png");
+}
+
 export function destroyNailEngine(): void {
   session?.release();
   session = null;
