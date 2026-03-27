@@ -153,19 +153,8 @@ async function startServer() {
       server: { middlewareMode: { server: app } },
       appType: "custom",
     });
-    // Vite handles static/HMR, Express handles API
+    // Vite handles static/HMR + SPA fallback + root redirect (via beautySpa plugin)
     app.use(vite.middlewares);
-    // SPA fallback for dev (after API routes are already registered above)
-    app.use("/beauty/{*splat}", async (req, res, next) => {
-      if (req.path.startsWith("/beauty/api")) return next();
-      try {
-        const html = readFileSync(join(__dirname, "index.html"), "utf-8");
-        const transformed = await vite.transformIndexHtml(req.originalUrl, html);
-        res.status(200).set({ "Content-Type": "text/html" }).end(transformed);
-      } catch (e) {
-        next(e);
-      }
-    });
   } else {
     // Production: serve built files
     app.use("/beauty", express.static(join(__dirname, "dist")));
@@ -174,11 +163,6 @@ async function startServer() {
       res.sendFile(join(__dirname, "dist", "index.html"));
     });
   }
-
-  // Root redirect
-  app.get("/", (_req, res) => {
-    res.redirect("/beauty");
-  });
 
   app.listen(PORT, () => {
     console.log(`Server running on http://localhost:${PORT}/beauty/`);
