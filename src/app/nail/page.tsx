@@ -126,7 +126,7 @@ export default function NailPage() {
       </header>
 
       {/* Main area */}
-      <div className="flex-1 relative flex items-center justify-center bg-black overflow-auto">
+      <div className="flex-1 min-h-0 relative flex items-center justify-center bg-black overflow-hidden">
 
         {/* Landing */}
         {!uploadedPhoto && (
@@ -149,12 +149,12 @@ export default function NailPage() {
 
         {/* Display image */}
         {displayImage && (
-          <div className="relative w-full flex items-center justify-center">
+          <div className="relative w-full h-full flex items-center justify-center p-2">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={displayImage}
               alt="네일 아트 결과"
-              className="w-full object-contain"
+              className="max-w-full max-h-full object-contain"
             />
 
             {/* Result badge */}
