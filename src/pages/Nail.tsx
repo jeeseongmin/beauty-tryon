@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Link } from "react-router-dom";
 
 const SAMPLES = [
@@ -41,6 +41,12 @@ const STEPS = [
 
 type Mode = null | "solid" | "art";
 
+interface QueueItem {
+  id: number;
+  image: string;
+  label: string;
+}
+
 function Stepper({ current }: { current: number }) {
   return (
     <div className="flex items-center justify-center gap-2 px-4 py-2 bg-gray-900/50">
@@ -80,6 +86,13 @@ export default function NailPage() {
   const [customColor, setCustomColor] = useState(COLOR_PRESETS[0].hex);
   const [selectedFinish, setSelectedFinish] = useState("glossy");
 
+  // Queue state
+  const [queue, setQueue] = useState<QueueItem[]>([]);
+  const [showQueuePopup, setShowQueuePopup] = useState(false);
+  const [animating, setAnimating] = useState(false);
+  const queueBtnRef = useRef<HTMLDivElement>(null);
+  const nextQueueId = useRef(1);
+
   // Current step: 0 = photo, 1 = design
   const currentStep = !uploadedPhoto ? 0 : 1;
 
@@ -114,7 +127,6 @@ export default function NailPage() {
     reader.readAsDataURL(blob);
   };
 
-  // Generate: nail art (sample)
   const generateArtPreview = async () => {
     if (!uploadedPhoto || !selectedId) return;
     setProcessing(true);
@@ -140,7 +152,6 @@ export default function NailPage() {
     }
   };
 
-  // Generate: solid color
   const generateSolidPreview = async () => {
     if (!uploadedPhoto) return;
     setProcessing(true);
@@ -164,6 +175,32 @@ export default function NailPage() {
     } finally {
       setProcessing(false);
     }
+  };
+
+  // Add to queue
+  const addToQueue = () => {
+    if (!resultImage) return;
+    const label = mode === "solid"
+      ? `${FINISHES.find(f => f.id === selectedFinish)?.name} ${selectedColor}`
+      : `디자인 ${selectedId}`;
+    setQueue((prev) => [...prev, { id: nextQueueId.current++, image: resultImage, label }]);
+    setAnimating(true);
+  };
+
+  useEffect(() => {
+    if (animating) {
+      const timer = setTimeout(() => setAnimating(false), 500);
+      return () => clearTimeout(timer);
+    }
+  }, [animating]);
+
+  const removeFromQueue = (id: number) => {
+    setQueue((prev) => prev.filter((item) => item.id !== id));
+  };
+
+  const viewQueueItem = (item: QueueItem) => {
+    setPopupSrc(item.image);
+    setShowQueuePopup(false);
   };
 
   const retake = () => {
@@ -193,6 +230,7 @@ export default function NailPage() {
 
   const displayImage = resultImage || uploadedPhoto;
   const currentFinish = FINISHES.find((f) => f.id === selectedFinish)!;
+  const latestQueue = queue.length > 0 ? queue[queue.length - 1] : null;
 
   return (
     <div className="h-screen flex flex-col bg-gray-950 text-white overflow-hidden">
@@ -214,7 +252,29 @@ export default function NailPage() {
           </Link>
         )}
         <h1 className="text-sm font-semibold">💅 네일 아트 체험</h1>
-        <div className="w-16 flex justify-end">
+        <div className="flex items-center gap-2">
+          {/* Queue indicator */}
+          <div ref={queueBtnRef} className="relative">
+            {queue.length > 0 && (
+              <button
+                onClick={() => setShowQueuePopup(!showQueuePopup)}
+                className={`w-9 h-9 rounded-full border-2 border-purple-500 overflow-hidden transition-transform ${
+                  animating ? "scale-125" : "scale-100"
+                }`}
+              >
+                <img
+                  src={latestQueue!.image}
+                  alt="대기열"
+                  className="w-full h-full object-cover"
+                />
+              </button>
+            )}
+            {queue.length > 1 && (
+              <span className="absolute -top-1 -right-1 w-4 h-4 bg-purple-500 rounded-full text-[10px] font-bold flex items-center justify-center">
+                {queue.length}
+              </span>
+            )}
+          </div>
           {resultImage && (
             <button onClick={takeScreenshot} className="text-lg" title="저장">📸</button>
           )}
@@ -226,7 +286,6 @@ export default function NailPage() {
 
       {/* Main area */}
       <div className="flex-1 min-h-0 relative flex items-center justify-center bg-black overflow-hidden">
-        {/* Landing — no photo yet */}
         {!uploadedPhoto && (
           <div className="text-center p-8">
             <div className="text-6xl mb-6">💅</div>
@@ -245,19 +304,27 @@ export default function NailPage() {
           </div>
         )}
 
-        {/* Display image */}
         {displayImage && (
           <div className="relative w-full h-full flex items-center justify-center p-2">
             <img src={displayImage} alt="네일 아트 결과" className="max-w-full max-h-full object-contain" />
             {resultImage && (
-              <div className="absolute top-4 left-4 bg-purple-500/80 rounded-full px-3 py-1 backdrop-blur">
-                <span className="text-xs font-medium">AI 적용 완료</span>
-              </div>
+              <>
+                <div className="absolute top-4 left-4 bg-purple-500/80 rounded-full px-3 py-1 backdrop-blur">
+                  <span className="text-xs font-medium">AI 적용 완료</span>
+                </div>
+                {/* Add to queue button */}
+                <button
+                  onClick={addToQueue}
+                  className="absolute top-4 right-4 w-10 h-10 bg-purple-500/80 hover:bg-purple-500 rounded-full flex items-center justify-center backdrop-blur transition-colors"
+                  title="대기열에 추가"
+                >
+                  <span className="text-lg">+</span>
+                </button>
+              </>
             )}
           </div>
         )}
 
-        {/* Processing spinner */}
         {processing && (
           <div className="absolute inset-0 flex items-center justify-center bg-black/60 backdrop-blur-sm">
             <div className="text-center">
@@ -268,7 +335,6 @@ export default function NailPage() {
           </div>
         )}
 
-        {/* Error */}
         {error && (
           <div className="absolute bottom-32 left-4 right-4 text-center">
             <p className="text-red-400 text-sm bg-red-900/30 inline-block px-4 py-2 rounded-full">{error}</p>
@@ -279,8 +345,6 @@ export default function NailPage() {
       {/* Bottom panel */}
       {uploadedPhoto && (
         <div className="bg-gray-900 border-t border-gray-800 flex-shrink-0">
-
-          {/* Mode select */}
           {!mode && !resultImage && (
             <div className="px-4 py-4">
               <p className="text-xs text-gray-400 text-center mb-3">디자인 방식을 선택하세요</p>
@@ -305,7 +369,6 @@ export default function NailPage() {
             </div>
           )}
 
-          {/* Art mode — sample selection */}
           {mode === "art" && (
             <>
               <div className="px-4 pt-3 pb-2">
@@ -340,7 +403,6 @@ export default function NailPage() {
             </>
           )}
 
-          {/* Solid color mode */}
           {mode === "solid" && (
             <>
               <div className="px-4 pt-3 pb-2 space-y-3">
@@ -404,7 +466,6 @@ export default function NailPage() {
             </>
           )}
 
-          {/* Result shown */}
           {resultImage && (
             <div className="px-4 py-3">
               <button
@@ -418,7 +479,43 @@ export default function NailPage() {
         </div>
       )}
 
-      {/* Popup */}
+      {/* Queue popup */}
+      {showQueuePopup && queue.length > 0 && (
+        <div
+          className="fixed inset-0 z-[90] bg-black/50"
+          onClick={() => setShowQueuePopup(false)}
+        >
+          <div
+            className="absolute top-14 right-4 w-72 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-4 py-3 border-b border-gray-800 flex items-center justify-between">
+              <span className="text-sm font-semibold">대기열 ({queue.length})</span>
+              <button onClick={() => setShowQueuePopup(false)} className="text-gray-500 hover:text-white text-sm">✕</button>
+            </div>
+            <div className="max-h-80 overflow-y-auto">
+              {queue.map((item) => (
+                <div key={item.id} className="flex items-center gap-3 px-4 py-2 hover:bg-gray-800/50 transition-colors">
+                  <button onClick={() => viewQueueItem(item)} className="flex-shrink-0">
+                    <img src={item.image} alt={item.label} className="w-12 h-12 rounded-lg object-cover" />
+                  </button>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs text-gray-300 truncate">{item.label}</p>
+                  </div>
+                  <button
+                    onClick={() => removeFromQueue(item.id)}
+                    className="flex-shrink-0 w-6 h-6 rounded-full bg-gray-700 hover:bg-red-500/50 flex items-center justify-center text-[10px] text-gray-400 hover:text-white transition-colors"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Popup — full image view */}
       {popupSrc && (
         <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur flex items-center justify-center p-6" onClick={() => setPopupSrc(null)}>
           <div className="relative max-w-2xl w-full" onClick={(e) => e.stopPropagation()}>
