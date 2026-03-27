@@ -20,10 +20,10 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 // API: Nail preview
 app.post("/beauty/api/nail-preview", async (req, res) => {
   try {
-    const { handPhoto, maskImage, sampleId } = req.body;
+    const { handPhoto, sampleId } = req.body;
 
-    if (!handPhoto || !maskImage || !sampleId) {
-      return res.status(400).json({ error: "Missing handPhoto, maskImage, or sampleId" });
+    if (!handPhoto || !sampleId) {
+      return res.status(400).json({ error: "Missing handPhoto or sampleId" });
     }
 
     // Read sample design image from public folder
@@ -31,9 +31,8 @@ app.post("/beauty/api/nail-preview", async (req, res) => {
     const sampleBuffer = readFileSync(samplePath);
     const sampleBase64 = sampleBuffer.toString("base64");
 
-    // Strip data URL prefix from hand photo and mask
+    // Strip data URL prefix from hand photo
     const handBase64 = handPhoto.replace(/^data:image\/\w+;base64,/, "");
-    const maskBase64 = maskImage.replace(/^data:image\/\w+;base64,/, "");
 
     const model = genAI.getGenerativeModel({
       model: "gemini-2.5-flash-image",
@@ -51,64 +50,49 @@ app.post("/beauty/api/nail-preview", async (req, res) => {
       },
       {
         inlineData: {
-          mimeType: "image/png",
-          data: maskBase64,
-        },
-      },
-      {
-        inlineData: {
           mimeType: "image/jpeg",
           data: sampleBase64,
         },
       },
       {
-        text: `You are a professional nail art inpainting editor.
+        text: `You are a professional nail art photo editor.
 
-You are given THREE images:
-1. FIRST image: Original hand photo
-2. SECOND image: A mask image where WHITE areas = nail regions, BLACK areas = everything else
-3. THIRD image: Nail art film/tip design samples laid out in a row
+You are given TWO images:
+1. FIRST image: A hand photo
+2. SECOND image: Nail art film/tip design samples laid out in a row
 
-INPAINTING RULE: ONLY modify the WHITE areas in the mask (the nails). Keep ALL black-masked areas (skin, background, everything else) EXACTLY unchanged from the original photo. The mask precisely defines where nails are — trust it completely.
+YOUR TASK: Detect the fingernails in the hand photo, then apply the nail art design from the second image onto those nails.
 
-CRITICAL — ORIENTATION OF THE NAIL FILM SAMPLES (third image):
-- The third image shows 5 nail films laid out VERTICALLY in a row
-- Order from LEFT to RIGHT: THUMB, INDEX, MIDDLE, RING, PINKY
-- EACH NAIL FILM HAS TWO ENDS:
-  * TOP end (in the sample image) = CUTICLE side = the end that attaches near the knuckle = WIDER/ROUNDER
-  * BOTTOM end (in the sample image) = FINGERTIP side = the free edge = NARROWER/POINTED
-- When applying to the hand photo:
-  * The TOP of the sample nail → goes toward the KNUCKLE (cuticle area) on the real finger
-  * The BOTTOM of the sample nail → goes toward the FINGERTIP on the real finger
-- DO NOT FLIP OR REVERSE the nail design. If the sample has decorations at the BOTTOM (fingertip end), those decorations MUST appear at the FINGERTIP of the result, NOT at the cuticle.
-- If the sample has a gradient that goes from light (top/cuticle) to dark (bottom/tip), the result must ALSO go from light (cuticle) to dark (tip). NEVER reverse the gradient direction.
-- Apply each film to the CORRECT finger: thumb design → thumb nail, index design → index nail, etc.
-
-Apply the nail art design from the third image onto ONLY the white-masked nail areas in the first image.
-- ONLY modify pixels that fall within the WHITE mask regions
-- Everything outside the white mask must remain pixel-perfect identical to the original photo
-
-CRITICAL — REPRODUCE THE DESIGN EXACTLY:
-- Copy EVERY detail from the sample: colors, gradients, patterns, decorations, glitter, metallic parts, 3D elements, jewels, lines, dots — everything visible on each sample nail
-- If the sample has decorations at the nail tip (e.g. metallic/chrome/silver accents, drip effects), those MUST appear at the fingertip end of the result nails too
-- If the sample has a gradient (e.g. pink to dark to metallic), reproduce that exact gradient direction and color transition
-- The design must FULLY COVER each nail from cuticle to tip — no bare/unpainted nail should be visible
-- Each finger's design should match its corresponding sample nail (left=thumb through right=pinky)
-
-NAIL SHAPE, TIP THICKNESS & LENGTH:
-- The nail shape MUST match the sample: almond, square, round, coffin, stiletto, etc.
-- The nail TIP THICKNESS must match the sample exactly — if the sample nail tip tapers to a thin/sharp point, the result must also taper to a thin/sharp point. If the sample tip is wide/blunt, the result must be wide/blunt.
-- The nail length MUST match the sample proportions
-- If the sample nails extend past the fingertip, the result nails should extend past the fingertip too
-
-HAND RECOGNITION:
-- Detect whatever nails are visible in the hand photo, but do NOT assume all 5 fingers are always visible
-- If only some fingers/nails are visible, only apply the design to those visible nails
+NAIL DETECTION:
+- Automatically find all visible fingernails in the hand photo
+- ONLY modify the nail areas — keep skin, background, and everything else EXACTLY unchanged
+- If only some fingers are visible, only apply to those visible nails
 - If no nails are clearly visible, return the original photo unchanged
 
+NAIL FILM SAMPLE ORIENTATION (second image):
+- The sample shows 5 nail films laid out VERTICALLY in a row
+- Order from LEFT to RIGHT: THUMB, INDEX, MIDDLE, RING, PINKY
+- TOP end = CUTICLE side (wider/rounder, attaches near knuckle)
+- BOTTOM end = FINGERTIP side (narrower/pointed, the free edge)
+- When applying: TOP of sample → cuticle area, BOTTOM of sample → fingertip
+- DO NOT FLIP OR REVERSE the design direction
+- Apply each film to its CORRECT finger (thumb design → thumb, etc.)
+
+REPRODUCE THE DESIGN EXACTLY:
+- Copy EVERY detail: colors, gradients, patterns, decorations, glitter, metallic parts, 3D elements, jewels, lines, dots
+- If the sample has tip decorations (chrome/silver accents, drip effects), they MUST appear at the fingertip
+- If the sample has a gradient, preserve its exact direction and color transition
+- The design must FULLY COVER each nail from cuticle to tip — no bare nail visible
+
+NAIL SHAPE & LENGTH:
+- Match the sample's nail shape: almond, square, round, coffin, stiletto, etc.
+- Match the sample's tip thickness exactly
+- Match the sample's length proportions
+- If sample nails extend past fingertips, result nails should too
+
 COMPOSITION:
-- Keep the EXACT same framing, zoom level, and composition as the original photo
-- Do NOT crop or zoom in — the output must show the entire original image
+- Keep the EXACT same framing, zoom level, and composition
+- Do NOT crop or zoom in
 - Make it look natural and realistic, like a professional nail salon photo
 
 Return ONLY the edited image.`,

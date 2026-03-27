@@ -1,6 +1,5 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef } from "react";
 import { Link } from "react-router-dom";
-import { initNailEngine, generateNailMask, destroyNailEngine } from "@/lib/nailArtEngine";
 
 const SAMPLES = [
   { id: 1, sample: "/beauty/nail-designs/sample1.jpeg", name: "기본" },
@@ -17,12 +16,7 @@ export default function NailPage() {
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [popupSrc, setPopupSrc] = useState<string | null>(null);
-  const [engineLoaded, setEngineLoaded] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    return () => { destroyNailEngine(); };
-  }, []);
 
   // Upload photo
   const handleUpload = () => {
@@ -66,26 +60,12 @@ export default function NailPage() {
     setError(null);
 
     try {
-      // Step 1: Generate nail mask via ONNX (browser-side)
-      if (!engineLoaded) {
-        await initNailEngine();
-        setEngineLoaded(true);
-      }
-
-      // Create an image element from the uploaded photo for ONNX
-      const img = new window.Image();
-      img.src = uploadedPhoto;
-      await new Promise((resolve) => { img.onload = resolve; });
-
-      const maskDataUrl = await generateNailMask(img);
-
-      // Step 2: Send photo + mask + sample to Gemini API
+      // Send photo + sample to Gemini API (Gemini detects nails directly)
       const res = await fetch("/beauty/api/nail-preview", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           handPhoto: uploadedPhoto,
-          maskImage: maskDataUrl,
           sampleId: selectedId,
         }),
       });
@@ -211,7 +191,7 @@ export default function NailPage() {
             <div className="text-center">
               <div className="animate-spin w-12 h-12 border-4 border-purple-500 border-t-transparent rounded-full mx-auto mb-6" />
               <p className="text-gray-300 text-sm mb-1">
-                {engineLoaded ? "AI가 네일 디자인을 적용하고 있습니다..." : "AI 엔진을 불러오는 중..."}
+                AI가 네일 디자인을 적용하고 있습니다...
               </p>
               <p className="text-gray-500 text-xs">약 5~10초 소요</p>
             </div>
