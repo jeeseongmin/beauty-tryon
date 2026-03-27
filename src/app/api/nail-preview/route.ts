@@ -57,11 +57,23 @@ IMPORTANT about the second image (nail film samples):
 Apply the nail art design from the second image onto the nails in the first image.
 - Keep the hand, skin, and background EXACTLY the same — do not alter anything except the nails
 - Only change the nails to match the design pattern/color/art from the second image
-- NAIL SHAPE: The nail shape in the result MUST match the nail film shape from the second image. If the sample nails are almond-shaped (tapered/pointed tips), make the result nails almond-shaped too. If they are square, make them square. If they are round, make them round. Copy the exact nail shape from the sample.
-- NAIL LENGTH: Match the nail length from the sample image as closely as possible
-- Make it look natural and realistic, as if the nail film is actually applied on the hand
-- IMPORTANT: Keep the EXACT same framing, zoom level, and composition as the original photo. Do NOT crop or zoom in. The output must show the entire original image.
-- The result should look like a professional nail salon photo
+
+CRITICAL — REPRODUCE THE DESIGN EXACTLY:
+- Copy EVERY detail from the sample: colors, gradients, patterns, decorations, glitter, metallic parts, 3D elements, jewels, lines, dots — everything visible on each sample nail
+- If the sample has decorations at the nail tip (e.g. metallic/chrome/silver accents, drip effects), those MUST appear at the fingertip end of the result nails too
+- If the sample has a gradient (e.g. pink to dark to metallic), reproduce that exact gradient direction and color transition
+- The design must FULLY COVER each nail from cuticle to tip — no bare/unpainted nail should be visible
+- Each finger's design should match its corresponding sample nail (left=thumb through right=pinky)
+
+NAIL SHAPE & LENGTH:
+- The nail shape MUST match the sample: almond, square, round, coffin, stiletto, etc.
+- The nail length MUST match the sample proportions
+- If the sample nails extend past the fingertip, the result nails should extend past the fingertip too
+
+COMPOSITION:
+- Keep the EXACT same framing, zoom level, and composition as the original photo
+- Do NOT crop or zoom in — the output must show the entire original image
+- Make it look natural and realistic, like a professional nail salon photo
 
 Return ONLY the edited image.`,
       },
