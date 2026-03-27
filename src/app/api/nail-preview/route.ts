@@ -57,6 +57,7 @@ Apply the nail art design from the second image onto the nails in the first imag
 - Make it look natural and realistic, as if the nail film is actually applied
 - Match the nail shape and perspective from the original photo
 - The result should look like a professional nail salon photo
+- IMPORTANT: Keep the EXACT same framing, zoom level, and composition as the original photo. Do NOT crop or zoom in. The output must show the entire original image.
 
 Return ONLY the edited image.`,
       },
