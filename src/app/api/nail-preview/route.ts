@@ -44,13 +44,18 @@ export async function POST(req: NextRequest) {
       {
         text: `You are a professional nail art editor.
 
-The first image is a photo of a hand/nails. The second image is a nail art design sample.
+The first image is a photo of a hand/nails. The second image shows nail art film/tip samples laid out in a row.
+
+IMPORTANT about the second image (nail film samples):
+- The WIDER/ROUNDER end of each nail film is the cuticle side (attaches near the knuckle)
+- The NARROWER/POINTED end is the fingertip side
+- Apply the design with correct orientation: wider part toward the hand, narrower part toward fingertip
 
 Apply the nail art design from the second image onto the nails in the first image.
-- Keep the hand, skin, and background exactly the same
-- Only change the nails to match the design pattern/color from the second image
-- Make it look natural and realistic, as if the person actually has that nail art applied
-- Preserve the nail shape and perspective from the original photo
+- Keep the hand, skin, and background EXACTLY the same — do not alter anything except the nails
+- Only change the nails to match the design pattern/color/art from the second image
+- Make it look natural and realistic, as if the nail film is actually applied
+- Match the nail shape and perspective from the original photo
 - The result should look like a professional nail salon photo
 
 Return ONLY the edited image.`,
