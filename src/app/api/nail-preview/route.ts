@@ -47,9 +47,12 @@ export async function POST(req: NextRequest) {
 The first image is a photo of a hand/nails. The second image shows nail art film/tip samples laid out in a row.
 
 IMPORTANT about the second image (nail film samples):
+- The second image shows 5 nail films laid out in a row, ordered from LEFT to RIGHT: THUMB, INDEX, MIDDLE, RING, PINKY
+- The LEFTMOST (largest/widest) film is for the THUMB, the RIGHTMOST (smallest/narrowest) is for the PINKY
 - The WIDER/ROUNDER end of each nail film is the cuticle side (attaches near the knuckle)
 - The NARROWER/POINTED end is the fingertip side
-- Apply the design with correct orientation: wider part toward the hand, narrower part toward fingertip
+- Apply each film to the CORRECT finger: thumb design → thumb nail, index design → index nail, etc.
+- Each finger's design may have slightly different patterns or sizes — match them accurately per finger
 
 Apply the nail art design from the second image onto the nails in the first image.
 - Keep the hand, skin, and background EXACTLY the same — do not alter anything except the nails
