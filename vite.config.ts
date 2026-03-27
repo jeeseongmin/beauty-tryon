@@ -1,10 +1,25 @@
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
 
+// Plugin to redirect /beauty → /beauty/
+function beautyRedirect(): Plugin {
+  return {
+    name: "beauty-redirect",
+    configureServer(server) {
+      server.middlewares.use((req, _res, next) => {
+        if (req.url === "/beauty") {
+          req.url = "/beauty/";
+        }
+        next();
+      });
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), beautyRedirect()],
   base: "/beauty/",
   resolve: {
     alias: {

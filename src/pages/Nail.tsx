@@ -3,11 +3,11 @@ import { Link } from "react-router-dom";
 import { initNailEngine, generateNailMask, destroyNailEngine } from "@/lib/nailArtEngine";
 
 const SAMPLES = [
-  { id: 1, sample: "/nail-designs/sample1.jpeg", name: "기본" },
-  { id: 2, sample: "/nail-designs/sample2.jpeg", name: "디자인 2" },
-  { id: 3, sample: "/nail-designs/sample3.jpeg", name: "디자인 3" },
-  { id: 4, sample: "/nail-designs/sample4.jpeg", name: "디자인 4" },
-  { id: 5, sample: "/nail-designs/sample5.jpeg", name: "디자인 5" },
+  { id: 1, sample: "/beauty/nail-designs/sample1.jpeg", name: "기본" },
+  { id: 2, sample: "/beauty/nail-designs/sample2.jpeg", name: "디자인 2" },
+  { id: 3, sample: "/beauty/nail-designs/sample3.jpeg", name: "디자인 3" },
+  { id: 4, sample: "/beauty/nail-designs/sample4.jpeg", name: "디자인 4" },
+  { id: 5, sample: "/beauty/nail-designs/sample5.jpeg", name: "디자인 5" },
 ];
 
 export default function NailPage() {
