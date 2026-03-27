@@ -94,7 +94,7 @@ export default function NailPage() {
   const displayImage = resultImage || uploadedPhoto;
 
   return (
-    <div className="flex-1 flex flex-col bg-gray-950 text-white">
+    <div className="h-screen flex flex-col bg-gray-950 text-white overflow-hidden">
       {/* Hidden file input */}
       <input
         ref={fileInputRef}
