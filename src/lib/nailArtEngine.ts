@@ -302,7 +302,7 @@ export async function initNailEngine(): Promise<void> {
   if (session) return;
 
   const ortModule = await loadOrt();
-  session = await ortModule.InferenceSession.create("/models/nails_seg.onnx", {
+  session = await ortModule.InferenceSession.create("/beauty/models/nails_seg.onnx", {
     executionProviders: ["webgl", "wasm"],
   });
 }
