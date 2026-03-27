@@ -1,5 +1,3 @@
-"use client";
-
 import { NailDesign } from "@/data/products";
 
 interface NailPaletteProps {

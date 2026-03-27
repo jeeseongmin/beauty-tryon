@@ -1,5 +1,3 @@
-"use client";
-
 /**
  * Hair color engine using MediaPipe Image Segmenter (multiclass).
  *

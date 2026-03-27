@@ -1,5 +1,3 @@
-"use client";
-
 import { HairColor, hairCategories } from "@/data/products";
 
 interface ColorPaletteProps {

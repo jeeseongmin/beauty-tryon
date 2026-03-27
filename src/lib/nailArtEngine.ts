@@ -1,5 +1,3 @@
-"use client";
-
 /**
  * Nail art engine using YOLOv8 segmentation ONNX model.
  *

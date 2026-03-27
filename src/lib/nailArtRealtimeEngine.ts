@@ -1,5 +1,3 @@
-"use client";
-
 /**
  * Real-time nail art overlay engine using MediaPipe HandLandmarker.
  *
